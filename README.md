@@ -1,5 +1,7 @@
 # fuseraft-server
 
+<img src="wwwroot/fuseraft-banner.png" alt="fuseraft — an agent orchestration framework">
+
 A Blazor Server web UI for [fuseraft](https://github.com/fuseraft/fuseraft-cli) — manage agent orchestration sessions, build orchestration configs visually, handle human-in-the-loop approvals, and schedule recurring runs, all from a browser.
 
 ---
