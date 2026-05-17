@@ -1,0 +1,80 @@
+@page "/sessions/{SessionId}"
+@implements IDisposable
+@inject SessionHostService SessionService
+@inject NavigationManager Nav
+
+<PageTitle>@SessionId — Fuseraft</PageTitle>
+
+@if (_session is null)
+{
+    <div class="page-header"><h1>Session not found</h1></div>
+    <p class="muted">No session with ID <code>@SessionId</code> exists.</p>
+    <a href="/sessions" class="btn">← Back to Sessions</a>
+    return;
+}
+
+<div class="page-header session-detail-header">
+    <div class="session-meta">
+        <div class="session-id-row">
+            <code class="session-id-chip">@SessionId</code>
+            <StatusBadge Status="@_session.Status" />
+        </div>
+        <p class="session-task">@_session.Task</p>
+        <p class="session-timing muted">
+            Started @_session.StartedAt.LocalDateTime.ToString("MMM d, HH:mm")
+            @if (_session.EndedAt.HasValue)
+            {
+                <span> · Ended @_session.EndedAt.Value.LocalDateTime.ToString("HH:mm")</span>
+            }
+            <span> · Duration @_session.DurationLabel</span>
+        </p>
+        @if (!string.IsNullOrEmpty(_session.WorkspaceDir))
+        {
+            <p class="session-workspace muted">
+                <span class="workspace-label">Workspace</span>
+                <code class="workspace-path">@_session.WorkspaceDir</code>
+            </p>
+        }
+    </div>
+    <div class="header-actions">
+        @if (_session.Status is SessionStatus.Running or SessionStatus.Starting)
+        {
+            <button class="btn btn-danger" @onclick="Cancel">Cancel Session</button>
+        }
+        <a href="/sessions" class="btn">← Back</a>
+    </div>
+</div>
+
+@if (_session.Status == SessionStatus.Failed && _session.ErrorMessage is not null)
+{
+    <div class="error-banner">@_session.ErrorMessage</div>
+}
+
+<LiveFeed Events="@_events" />
+
+@code {
+    [Parameter] public string SessionId { get; set; } = string.Empty;
+
+    private ManagedSession?  _session;
+    private List<SessionEvent> _events = [];
+
+    protected override void OnInitialized()
+    {
+        _session = SessionService.GetSession(SessionId);
+        if (_session is not null)
+        {
+            _events = [.._session.Events];
+            SessionService.EventFired += OnEvent;
+        }
+    }
+
+    private void OnEvent(string sessionId, SessionEvent evt)
+    {
+        if (sessionId != SessionId) return;
+        InvokeAsync(() => { _events.Add(evt); StateHasChanged(); });
+    }
+
+    private void Cancel() => SessionService.CancelSession(SessionId);
+
+    public void Dispose() => SessionService.EventFired -= OnEvent;
+}

@@ -1,0 +1,86 @@
+@page "/plugins"
+@inject PluginCatalogService Catalog
+
+<PageTitle>Plugins — Fuseraft</PageTitle>
+
+<div class="page-header">
+    <h1>Plugins</h1>
+    <span class="plugin-totals">
+        @Catalog.Plugins.Count plugins · @Catalog.Plugins.Sum(p => p.Functions.Count) functions
+    </span>
+</div>
+
+<div class="plugin-search-bar">
+    <input class="input" placeholder="Filter plugins or functions…" @bind="_query" @bind:event="oninput" />
+</div>
+
+<div class="plugin-catalog">
+    @foreach (var plugin in Filtered)
+    {
+        var expanded = _expanded.Contains(plugin.Name);
+        <div class="plugin-card @(expanded ? "plugin-card-open" : "")">
+            <button class="plugin-card-header" @onclick="() => Toggle(plugin.Name)">
+                <div class="plugin-card-title-row">
+                    <span class="plugin-card-name">@plugin.Name</span>
+                    <span class="plugin-fn-count">@plugin.Functions.Count fn@(plugin.Functions.Count == 1 ? "" : "s")</span>
+                </div>
+                <div class="plugin-card-desc">@plugin.Description</div>
+                <span class="plugin-expand-chevron">@(expanded ? "▲" : "▼")</span>
+            </button>
+
+            @if (expanded)
+            {
+                <div class="plugin-fn-list">
+                    @foreach (var fn in plugin.Functions)
+                    {
+                        <div class="plugin-fn-row">
+                            <code class="plugin-fn-name">@fn.Name</code>
+                            <span class="plugin-fn-desc">@fn.Description</span>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private string _query   = string.Empty;
+    private readonly HashSet<string> _expanded = [];
+
+    private IEnumerable<PluginEntry> Filtered
+    {
+        get
+        {
+            var q = _query.Trim();
+            if (string.IsNullOrEmpty(q)) return Catalog.Plugins;
+
+            return Catalog.Plugins
+                .Where(p =>
+                    p.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    p.Description.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    p.Functions.Any(f =>
+                        f.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                        f.Description.Contains(q, StringComparison.OrdinalIgnoreCase)))
+                .Select(p =>
+                {
+                    // When filtering by function text, only show matching functions.
+                    if (p.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                        p.Description.Contains(q, StringComparison.OrdinalIgnoreCase))
+                        return p;
+
+                    var matchingFns = p.Functions
+                        .Where(f => f.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                                    f.Description.Contains(q, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    return p with { Functions = matchingFns };
+                });
+        }
+    }
+
+    private void Toggle(string name)
+    {
+        if (!_expanded.Add(name)) _expanded.Remove(name);
+        StateHasChanged();
+    }
+}

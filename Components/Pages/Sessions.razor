@@ -1,0 +1,148 @@
+@page "/sessions"
+@implements IDisposable
+@inject SessionHostService SessionService
+@inject NavigationManager Nav
+@using Microsoft.AspNetCore.WebUtilities
+
+<PageTitle>Sessions — Fuseraft</PageTitle>
+
+<div class="page-header">
+    <h1>Sessions</h1>
+    <a href="/orchestration/builder" class="btn">Build Orchestration…</a>
+    <button class="btn btn-primary" @onclick="OpenDialog">+ New Session</button>
+</div>
+
+@if (_showNew)
+{
+    <div class="dialog-backdrop" @onclick="CloseDialog">
+        <div class="dialog" @onclick:stopPropagation>
+            <div class="dialog-header">
+                <h2>New Session</h2>
+                <button class="btn-icon" @onclick="CloseDialog">✕</button>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Task</label>
+                <textarea @bind="_newTask" rows="4" class="input"
+                          placeholder="Describe what you want the agent team to accomplish…"></textarea>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Workspace</label>
+                <div class="input-with-btn">
+                    <input @bind="_newWorkspace" class="input" placeholder="/home/user/myproject" />
+                    <button class="btn btn-sm" @onclick="TogglePicker">Browse…</button>
+                </div>
+                @if (_showDirPicker)
+                {
+                    <DirPicker InitialPath="@_newWorkspace"
+                               OnSelect="OnDirSelected"
+                               OnClose="ClosePicker" />
+                }
+                <p class="form-hint">Absolute path to the directory where the orchestration runs.</p>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Config File</label>
+                <input @bind="_newConfig" class="input" placeholder="config/orchestration.yaml" />
+                <p class="form-hint">
+                    Relative to the workspace, or an absolute path.
+                    @if (!string.IsNullOrWhiteSpace(_newWorkspace) && !string.IsNullOrWhiteSpace(_newConfig)
+                         && !Path.IsPathRooted(_newConfig))
+                    {
+                        <span class="resolved-path">→ @Path.Combine(_newWorkspace.Trim(), _newConfig.Trim())</span>
+                    }
+                </p>
+            </div>
+            @if (_startError is not null)
+            {
+                <div class="error-banner">@_startError</div>
+            }
+            <div class="dialog-footer">
+                <button class="btn" @onclick="CloseDialog">Cancel</button>
+                <button class="btn btn-primary" @onclick="StartAsync" disabled="@_starting">
+                    @(_starting ? "Starting…" : "Start Session")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<div class="filter-bar">
+    @foreach (var f in new[] { "All", "Running", "Succeeded", "Failed", "Cancelled" })
+    {
+        <button class="filter-btn @(_filter == f ? "active" : "")" @onclick="() => SetFilter(f)">@f</button>
+    }
+</div>
+
+<SessionTable Sessions="@Filtered" OnSelect="@(id => Nav.NavigateTo($"/sessions/{id}"))" />
+
+@code {
+    private bool   _showNew       = false;
+    private bool   _showDirPicker = false;
+    private bool   _starting      = false;
+    private string _newTask       = string.Empty;
+    private string _newWorkspace  = string.Empty;
+    private string _newConfig     = "config/orchestration.yaml";
+    private string? _startError;
+    private string _filter = "All";
+
+    private IEnumerable<ManagedSession> Filtered => _filter switch
+    {
+        "Running"   => SessionService.GetSessions().Where(s => s.Status is SessionStatus.Running or SessionStatus.Starting),
+        "Succeeded" => SessionService.GetSessions().Where(s => s.Status == SessionStatus.Succeeded),
+        "Failed"    => SessionService.GetSessions().Where(s => s.Status == SessionStatus.Failed),
+        "Cancelled" => SessionService.GetSessions().Where(s => s.Status == SessionStatus.Cancelled),
+        _           => SessionService.GetSessions(),
+    };
+
+    protected override void OnInitialized()
+    {
+        SessionService.SessionListChanged += OnListChanged;
+        var uri  = new Uri(Nav.Uri);
+        var qs   = QueryHelpers.ParseQuery(uri.Query);
+        if (qs.TryGetValue("workspace", out var ws)  && !string.IsNullOrWhiteSpace(ws))
+            _newWorkspace = ws!;
+        if (qs.TryGetValue("config",    out var cfg) && !string.IsNullOrWhiteSpace(cfg))
+            _newConfig = cfg!;
+        if (qs.TryGetValue("new",       out var nw)  && nw == "true")
+            _showNew = true;
+    }
+
+    private void OnListChanged() => InvokeAsync(StateHasChanged);
+
+    private void OpenDialog()         { _showNew = true;  _showDirPicker = false; StateHasChanged(); }
+    private void SetFilter(string f) { _filter = f;      StateHasChanged(); }
+    private void CloseDialog()       { _showNew = false; _showDirPicker = false; _startError = null; StateHasChanged(); }
+    private void TogglePicker()      { _showDirPicker = !_showDirPicker; StateHasChanged(); }
+    private void ClosePicker()       { _showDirPicker = false; StateHasChanged(); }
+    private void OnDirSelected(string path) { _newWorkspace = path; _showDirPicker = false; StateHasChanged(); }
+
+    private async Task StartAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newTask))
+        {
+            _startError = "Task is required.";
+            return;
+        }
+
+        _starting   = true;
+        _startError = null;
+        StateHasChanged();
+
+        try
+        {
+            var id = await SessionService.StartSessionAsync(
+                _newTask.Trim(), _newConfig.Trim(), _newWorkspace.Trim());
+            _showNew = false;
+            Nav.NavigateTo($"/sessions/{id}");
+        }
+        catch (Exception ex)
+        {
+            _startError = ex.Message;
+        }
+        finally
+        {
+            _starting = false;
+        }
+    }
+
+    public void Dispose() => SessionService.SessionListChanged -= OnListChanged;
+}

@@ -1,0 +1,464 @@
+@page "/orchestration/builder"
+@inject OrchestrationTemplateService TemplateService
+@inject NavigationManager Nav
+
+<PageTitle>Orchestration Builder — Fuseraft</PageTitle>
+
+<div class="page-header">
+    <h1>Orchestration Builder</h1>
+</div>
+
+<div class="builder-steps">
+    <div class="builder-step @(_step >= 1 ? (_step > 1 ? "done" : "active") : "")">1. Template</div>
+    <div class="builder-step @(_step >= 2 ? "active" : "")">2. Configure</div>
+</div>
+
+@if (_step == 1)
+{
+    <p class="muted" style="margin-bottom:20px">Pick a starting template. You can customise everything in the next step.</p>
+    <div class="template-grid">
+        @foreach (var t in OrchestrationTemplateService.Templates)
+        {
+            <button class="template-card @(_selectedKey == t.Key ? "selected" : "")"
+                    @onclick="() => SelectTemplate(t.Key)">
+                <div class="template-card-name">@t.Name</div>
+                <div class="template-card-desc">@t.Description</div>
+                <div class="template-card-agents">
+                    @foreach (var a in t.DefaultAgents)
+                    {
+                        <span class="template-card-agent-pill">@a</span>
+                    }
+                </div>
+            </button>
+        }
+    </div>
+    <div style="margin-top:24px; display:flex; gap:10px;">
+        <button class="btn btn-primary" @onclick="GoToStep2" disabled="@(_selectedKey is null)">Next →</button>
+        <a href="/sessions" class="btn">Cancel</a>
+    </div>
+}
+
+@if (_step == 2 && _template is not null)
+{
+    <div class="orch-canvas-section">
+
+        <!-- Left: visual canvas + agent editor -->
+        <div style="min-width:0;">
+            <div class="orch-section-label">Orchestration</div>
+            <div class="orch-container">
+                <div class="orch-container-header">
+                    <span class="orch-container-name">@_orchName</span>
+                    <div class="orch-container-meta">
+                        <span class="orch-selection-badge">@_template.SelectionType</span>
+                    </div>
+                </div>
+                <div class="orch-agent-flow">
+                    @for (int i = 0; i < _agents.Count; i++)
+                    {
+                        var agent = _agents[i];
+                        var idx   = i;
+                        @if (i > 0)
+                        {
+                            <div class="orch-agent-slot"><div class="orch-agent-arrow">→</div></div>
+                        }
+                        <div class="orch-agent-slot">
+                            <div class="agent-node @(_selectedAgent == idx ? "selected-node" : "")"
+                                 @onclick="() => SelectAgent(idx)">
+                                <div class="agent-node-header">
+                                    <span class="agent-node-name">@agent.Name</span>
+                                    <span class="agent-node-expand">@(_selectedAgent == idx ? "▲" : "▼")</span>
+                                </div>
+                                <div class="agent-node-model">
+                                    @(string.IsNullOrEmpty(agent.ModelOverride) ? _model : agent.ModelOverride)
+                                    @if (!string.IsNullOrEmpty(agent.FunctionChoice))
+                                    {
+                                        <span class="agent-fc-pill">@agent.FunctionChoice</span>
+                                    }
+                                </div>
+                                @if (agent.Plugins.Count > 0)
+                                {
+                                    <div class="agent-node-plugins">
+                                        @foreach (var p in agent.Plugins)
+                                        {
+                                            <span class="agent-plugin-pill">@p</span>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                    <div class="orch-agent-slot" style="margin-left:12px;">
+                        <button class="btn btn-sm" @onclick="AddAgent">+ Agent</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Agent editor panel -->
+            @if (_selectedAgent.HasValue && _selectedAgent.Value < _agents.Count)
+            {
+                var a   = _agents[_selectedAgent.Value];
+                var idx = _selectedAgent.Value;
+                <div class="agent-editor-panel">
+                    <div class="agent-editor-title">
+                        <span>Edit Agent</span>
+                        @if (_agents.Count > 1)
+                        {
+                            <button class="btn btn-sm agent-remove-btn" @onclick="() => RemoveAgent(idx)">Remove</button>
+                        }
+                    </div>
+
+                    <!-- Name -->
+                    <div class="form-group">
+                        <label class="form-label">Name</label>
+                        <input class="input" value="@a.Name"
+                               @oninput="e => UpdateAgent(idx, d => d.Name = e.Value?.ToString() ?? string.Empty)" />
+                    </div>
+
+                    <!-- Description -->
+                    <div class="form-group">
+                        <label class="form-label">Description</label>
+                        <input class="input" value="@a.Description" placeholder="Short role description…"
+                               @oninput="e => UpdateAgent(idx, d => d.Description = e.Value?.ToString() ?? string.Empty)" />
+                    </div>
+
+                    <!-- Instructions -->
+                    <div class="form-group">
+                        <label class="form-label">Instructions</label>
+                        <textarea class="input agent-instructions-editor" rows="6"
+                                  placeholder="System prompt / instructions for this agent…"
+                                  @bind="a.Instructions" @bind:event="oninput"></textarea>
+                    </div>
+
+                    <!-- Model override -->
+                    <div class="agent-editor-row">
+                        <div class="form-group" style="flex:1;">
+                            <label class="form-label">Model Override</label>
+                            <input class="input" value="@a.ModelOverride" placeholder="(uses global default)"
+                                   @oninput="e => UpdateAgent(idx, d => d.ModelOverride = e.Value?.ToString() ?? string.Empty)" />
+                        </div>
+                        <div class="form-group" style="flex:1;">
+                            <label class="form-label">Endpoint</label>
+                            <input class="input" value="@a.Endpoint" placeholder="https://…"
+                                   @oninput="e => UpdateAgent(idx, d => d.Endpoint = e.Value?.ToString() ?? string.Empty)" />
+                        </div>
+                    </div>
+
+                    <!-- FunctionChoice -->
+                    <div class="agent-editor-row">
+                        <div class="form-group" style="flex:1;">
+                            <label class="form-label">FunctionChoice</label>
+                            <select class="input" value="@a.FunctionChoice"
+                                    @onchange="e => UpdateAgent(idx, d => d.FunctionChoice = e.Value?.ToString() ?? string.Empty)">
+                                <option value="">— inherit —</option>
+                                <option value="auto">auto</option>
+                                <option value="required">required</option>
+                                <option value="none">none</option>
+                            </select>
+                            <p class="form-hint">Controls whether the agent must call a tool each turn.</p>
+                        </div>
+
+                        <!-- MaxToolCallsPerTurn -->
+                        <div class="form-group" style="flex:1;">
+                            <label class="form-label">Max Tool Calls / Turn</label>
+                            <input class="input" type="number" min="1" max="100"
+                                   value="@(a.MaxToolCallsPerTurn?.ToString() ?? string.Empty)"
+                                   placeholder="(default)"
+                                   @oninput="e => UpdateAgent(idx, d => d.MaxToolCallsPerTurn = TryParseInt(e.Value?.ToString()))" />
+                        </div>
+                    </div>
+
+                    <!-- TrustScore + MaxTokens -->
+                    <div class="agent-editor-row">
+                        <div class="form-group" style="flex:1;">
+                            <label class="form-label">TrustScore <span class="form-label-muted">0.0 – 1.0</span></label>
+                            <input class="input" type="number" min="0" max="1" step="0.05"
+                                   value="@(a.TrustScore?.ToString("F2") ?? string.Empty)"
+                                   placeholder="(default)"
+                                   @oninput="e => UpdateAgent(idx, d => d.TrustScore = TryParseDouble(e.Value?.ToString()))" />
+                            <p class="form-hint">≥ 0.8 → ring 1 (least restricted sandbox).</p>
+                        </div>
+                        <div class="form-group" style="flex:1;">
+                            <label class="form-label">MaxTokens</label>
+                            <input class="input" type="number" min="256" step="256"
+                                   value="@(a.MaxTokens?.ToString() ?? string.Empty)"
+                                   placeholder="(model default)"
+                                   @oninput="e => UpdateAgent(idx, d => d.MaxTokens = TryParseInt(e.Value?.ToString()))" />
+                            <p class="form-hint">Override the model's max output tokens.</p>
+                        </div>
+                    </div>
+
+                    <!-- Plugins -->
+                    <div class="form-group">
+                        <label class="form-label">Plugins</label>
+                        <div class="agent-plugin-toggles">
+                            @foreach (var plugin in AllPlugins)
+                            {
+                                var has = a.Plugins.Contains(plugin);
+                                <button class="btn btn-sm @(has ? "btn-primary" : "")"
+                                        @onclick="() => TogglePlugin(idx, plugin)">@plugin</button>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <!-- Right: side panel -->
+        <div class="orch-side-panel">
+            <div class="form-group">
+                <label class="form-label">Default Model</label>
+                <input class="input" value="@_model" @oninput="OnModelChanged" />
+                <p class="form-hint">Applies to any agent without a model override.</p>
+            </div>
+
+            <div>
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+                    <span class="orch-section-label" style="margin-bottom:0">YAML</span>
+                    <button class="btn btn-sm" @onclick="SyncYamlFromDraft" title="Regenerate YAML from current visual state">↻ Sync from draft</button>
+                </div>
+                <textarea class="orch-yaml-editor" @bind="_yamlOverride"
+                          placeholder="Generated YAML will appear here…"></textarea>
+                <p class="form-hint">Edit freely. "Sync from draft" overwrites this with the current visual state.</p>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Workspace</label>
+                <div class="input-with-btn">
+                    <input class="input" @bind="_workspace" placeholder="/home/user/myproject" />
+                    <button class="btn btn-sm" @onclick="TogglePicker">Browse…</button>
+                </div>
+                @if (_showDirPicker)
+                {
+                    <DirPicker InitialPath="@_workspace" OnSelect="OnDirSelected" OnClose="ClosePicker" />
+                }
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Config File</label>
+                <input class="input" @bind="_configRelPath" placeholder="config/orchestration.yaml" />
+                @if (!string.IsNullOrWhiteSpace(_workspace) && !string.IsNullOrWhiteSpace(_configRelPath)
+                     && !Path.IsPathRooted(_configRelPath))
+                {
+                    <p class="orch-save-path">→ @Path.Combine(_workspace.Trim(), _configRelPath.Trim())</p>
+                }
+            </div>
+
+            @if (_saveError is not null)
+            {
+                <div class="error-banner">@_saveError</div>
+            }
+
+            <div class="orch-builder-actions">
+                <button class="btn" @onclick="() => _step = 1">← Back</button>
+                <button class="btn btn-primary" @onclick="SaveAndStartAsync" disabled="@_saving">
+                    @(_saving ? "Saving…" : "Save & Start Session")
+                </button>
+                <button class="btn" @onclick="SaveOnlyAsync" disabled="@_saving">
+                    @(_saving ? "Saving…" : "Save Only")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly string[] AllPlugins =
+    [
+        "FileSystem", "Shell", "Git", "Search",
+        "Http", "Json", "Document",
+        "CodeExecution", "Probe",
+        "Scratchpad", "Chatroom", "Changes",
+        "SubAgent", "Handoff",
+    ];
+
+    private int           _step        = 1;
+    private string?       _selectedKey;
+    private TemplateInfo? _template;
+
+    private string  _model         = "claude-opus-4-5";
+    private string  _orchName      = string.Empty;
+    private string  _workspace     = string.Empty;
+    private string  _configRelPath = "config/orchestration.yaml";
+    private bool    _showDirPicker = false;
+    private bool    _saving        = false;
+    private string? _saveError;
+    private string  _yamlOverride  = string.Empty;
+    private int?    _selectedAgent;
+
+    private List<AgentDraft> _agents = [];
+
+    private sealed class AgentDraft
+    {
+        public string  Name               { get; set; } = string.Empty;
+        public string  Description        { get; set; } = string.Empty;
+        public string  Instructions       { get; set; } = string.Empty;
+        public string  ModelOverride      { get; set; } = string.Empty;
+        public string  Endpoint           { get; set; } = string.Empty;
+        public string  FunctionChoice     { get; set; } = string.Empty;
+        public double? TrustScore         { get; set; }
+        public int?    MaxTokens          { get; set; }
+        public int?    MaxToolCallsPerTurn { get; set; }
+        public List<string> Plugins       { get; set; } = [];
+    }
+
+    private void SelectTemplate(string key) { _selectedKey = key; StateHasChanged(); }
+
+    private void GoToStep2()
+    {
+        if (_selectedKey is null) return;
+        _template = TemplateService.GetTemplate(_selectedKey);
+        if (_template is null) return;
+
+        _orchName = _template.Name;
+        _agents   = _template.DefaultAgents.Select(n => new AgentDraft
+        {
+            Name    = n,
+            Plugins = ["FileSystem", "Shell"],
+        }).ToList();
+        _selectedAgent = null;
+
+        // Seed YAML from template once; user edits it independently from here
+        try
+        {
+            _yamlOverride = TemplateService.Build(_template.Key, _model, null).MainConfig;
+        }
+        catch { _yamlOverride = string.Empty; }
+
+        _step = 2;
+        StateHasChanged();
+    }
+
+    private void SelectAgent(int idx)
+    {
+        _selectedAgent = _selectedAgent == idx ? null : idx;
+        StateHasChanged();
+    }
+
+    private void UpdateAgent(int idx, Action<AgentDraft> mutate)
+    {
+        mutate(_agents[idx]);
+        StateHasChanged();
+    }
+
+    private void AddAgent()
+    {
+        _agents.Add(new AgentDraft { Name = $"Agent-{_agents.Count + 1}", Plugins = [] });
+        _selectedAgent = _agents.Count - 1;
+        StateHasChanged();
+    }
+
+    private void RemoveAgent(int idx)
+    {
+        _agents.RemoveAt(idx);
+        _selectedAgent = null;
+        StateHasChanged();
+    }
+
+    private void TogglePlugin(int idx, string plugin)
+    {
+        var list = _agents[idx].Plugins;
+        if (list.Contains(plugin)) list.Remove(plugin);
+        else list.Add(plugin);
+        StateHasChanged();
+    }
+
+    private void OnModelChanged(ChangeEventArgs e)
+    {
+        _model = e.Value?.ToString() ?? _model;
+        StateHasChanged();
+    }
+
+    // Regenerate YAML from current draft state
+    private void SyncYamlFromDraft()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("Orchestration:");
+        sb.AppendLine($"  Name: {_orchName}");
+        sb.AppendLine();
+        sb.AppendLine("  Agents:");
+
+        foreach (var a in _agents)
+        {
+            sb.AppendLine($"    - Name: {a.Name}");
+            if (!string.IsNullOrWhiteSpace(a.Description))
+                sb.AppendLine($"      Description: {a.Description}");
+            if (!string.IsNullOrWhiteSpace(a.Instructions))
+            {
+                sb.AppendLine("      Instructions: |");
+                foreach (var line in a.Instructions.Replace("\r\n", "\n").Split('\n'))
+                    sb.AppendLine($"        {line}");
+            }
+            var modelId = string.IsNullOrWhiteSpace(a.ModelOverride) ? _model : a.ModelOverride;
+            sb.AppendLine("      Model:");
+            sb.AppendLine($"        ModelId: {modelId}");
+            if (!string.IsNullOrWhiteSpace(a.Endpoint))
+                sb.AppendLine($"        Endpoint: {a.Endpoint}");
+            if (a.Plugins.Count > 0)
+            {
+                sb.AppendLine("      Plugins:");
+                foreach (var p in a.Plugins) sb.AppendLine($"        - {p}");
+            }
+            if (!string.IsNullOrWhiteSpace(a.FunctionChoice))
+                sb.AppendLine($"      FunctionChoice: {a.FunctionChoice}");
+            if (a.TrustScore.HasValue)
+                sb.AppendLine($"      TrustScore: {a.TrustScore.Value:F2}");
+            if (a.MaxTokens.HasValue)
+                sb.AppendLine($"      MaxTokens: {a.MaxTokens.Value}");
+            if (a.MaxToolCallsPerTurn.HasValue)
+                sb.AppendLine($"      MaxToolCallsPerTurn: {a.MaxToolCallsPerTurn.Value}");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("  Selection:");
+        sb.AppendLine($"    Type: {_template?.SelectionType ?? "sequential"}");
+        sb.AppendLine();
+        sb.AppendLine("  Termination:");
+        sb.AppendLine("    Type: regex");
+        sb.AppendLine("    Pattern: TASK_COMPLETE");
+        sb.AppendLine("    MaxIterations: 20");
+
+        _yamlOverride = sb.ToString();
+        StateHasChanged();
+    }
+
+    private void TogglePicker()  { _showDirPicker = !_showDirPicker; StateHasChanged(); }
+    private void ClosePicker()   { _showDirPicker = false; StateHasChanged(); }
+    private void OnDirSelected(string path) { _workspace = path; _showDirPicker = false; StateHasChanged(); }
+
+    private static int?    TryParseInt(string? s)    => int.TryParse(s, out var v)    ? v : null;
+    private static double? TryParseDouble(string? s) => double.TryParse(s, out var v) ? v : null;
+
+    private async Task SaveAndStartAsync()
+    {
+        if (!await SaveConfigAsync()) return;
+        var ws  = _workspace.Trim();
+        var cfg = _configRelPath.Trim();
+        Nav.NavigateTo($"/sessions?workspace={Uri.EscapeDataString(ws)}&config={Uri.EscapeDataString(cfg)}&new=true");
+    }
+
+    private async Task SaveOnlyAsync() => await SaveConfigAsync();
+
+    private async Task<bool> SaveConfigAsync()
+    {
+        _saveError = null;
+
+        if (string.IsNullOrWhiteSpace(_workspace))     { _saveError = "Workspace is required."; return false; }
+        if (string.IsNullOrWhiteSpace(_configRelPath)) { _saveError = "Config file path is required."; return false; }
+        if (string.IsNullOrWhiteSpace(_yamlOverride))  { _saveError = "YAML content is empty."; return false; }
+
+        _saving = true;
+        StateHasChanged();
+
+        try
+        {
+            var ws      = _workspace.Trim();
+            var relPath = _configRelPath.Trim();
+            var absPath = Path.IsPathRooted(relPath) ? relPath : Path.GetFullPath(Path.Combine(ws, relPath));
+            var dir     = Path.GetDirectoryName(absPath)!;
+            await Task.Run(() => { Directory.CreateDirectory(dir); File.WriteAllText(absPath, _yamlOverride); });
+            return true;
+        }
+        catch (Exception ex) { _saveError = ex.Message; return false; }
+        finally { _saving = false; StateHasChanged(); }
+    }
+}

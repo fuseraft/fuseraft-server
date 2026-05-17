@@ -1,0 +1,47 @@
+@using fuseraft.Server.Models
+
+<div class="live-feed">
+    @{
+        // Only show agent_starting when it's the last event (agent still thinking)
+        var lastIdx = Events.Count - 1;
+        for (var i = 0; i <= lastIdx; i++)
+        {
+            var evt = Events[i];
+            switch (evt.Type)
+            {
+                case "message" when evt.Message is not null:
+                    <AgentCard Message="@evt.Message" Elapsed="@evt.Elapsed" />
+                    break;
+
+                case "agent_starting" when evt.AgentName is not null && i == lastIdx:
+                    <div class="thinking-row">
+                        <div class="spin"></div>
+                        <span class="muted">@evt.AgentName thinking…</span>
+                    </div>
+                    break;
+
+                case "session_end":
+                    <div class="session-end-row @(evt.Succeeded == true ? "end-ok" : "end-err")">
+                        @if (evt.Succeeded == true)
+                        {
+                            <span>✓ Session complete</span>
+                        }
+                        else
+                        {
+                            <span>✗ @(evt.ErrorMessage ?? "Session failed")</span>
+                        }
+                    </div>
+                    break;
+            }
+        }
+    }
+
+    @if (Events.Count == 0)
+    {
+        <div class="feed-empty muted">Waiting for the session to start…</div>
+    }
+</div>
+
+@code {
+    [Parameter] public List<SessionEvent> Events { get; set; } = [];
+}

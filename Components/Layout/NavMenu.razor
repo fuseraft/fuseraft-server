@@ -1,0 +1,55 @@
+@implements IDisposable
+@inject HitlBroker Broker
+
+<nav class="sidenav">
+    <div class="nav-logo">
+        <img src="fuseraft.svg" class="logo-icon" alt="fuseraft" />
+        <span class="logo-text">fuseraft</span>
+    </div>
+
+    <div class="nav-links">
+        <NavLink href="/" Match="NavLinkMatch.All" class="nav-item">
+            <span class="nav-icon">⊞</span>
+            <span>Dashboard</span>
+        </NavLink>
+        <NavLink href="/sessions" class="nav-item">
+            <span class="nav-icon">▶</span>
+            <span>Sessions</span>
+        </NavLink>
+        <NavLink href="/orchestration/builder" class="nav-item">
+            <span class="nav-icon">⬡</span>
+            <span>Builder</span>
+        </NavLink>
+        <NavLink href="/schedule" class="nav-item">
+            <span class="nav-icon">⏱</span>
+            <span>Schedule</span>
+        </NavLink>
+        <NavLink href="/plugins" class="nav-item">
+            <span class="nav-icon">🔌</span>
+            <span>Plugins</span>
+        </NavLink>
+        <NavLink href="/hitl" class="nav-item">
+            <span class="nav-icon">👤</span>
+            <span>HITL</span>
+            @if (_pendingCount > 0)
+            {
+                <span class="nav-badge">@_pendingCount</span>
+            }
+        </NavLink>
+    </div>
+</nav>
+
+@code {
+    private int _pendingCount;
+
+    protected override void OnInitialized()
+    {
+        _pendingCount = Broker.GetPending().Count;
+        Broker.PendingChanged += OnPendingChanged;
+    }
+
+    private void OnPendingChanged() =>
+        InvokeAsync(() => { _pendingCount = Broker.GetPending().Count; StateHasChanged(); });
+
+    public void Dispose() => Broker.PendingChanged -= OnPendingChanged;
+}

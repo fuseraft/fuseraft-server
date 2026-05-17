@@ -1,0 +1,74 @@
+@page "/"
+@implements IDisposable
+@inject SessionHostService SessionService
+@inject HitlBroker HitlBroker
+@inject ScheduleService ScheduleService
+@inject NavigationManager Nav
+
+<PageTitle>Dashboard — Fuseraft</PageTitle>
+
+<div class="page-header">
+    <h1>Dashboard</h1>
+    <button class="btn btn-primary" @onclick="GoToSessions">+ New Session</button>
+</div>
+
+<div class="stats-row">
+    <div class="stat-card">
+        <div class="stat-value @(_activeSessions > 0 ? "stat-active" : "")">@_activeSessions</div>
+        <div class="stat-label">Active</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">@_totalSessions</div>
+        <div class="stat-label">Total Sessions</div>
+    </div>
+    <div class="stat-card @(_pendingHitl > 0 ? "stat-warn-card" : "")">
+        <div class="stat-value @(_pendingHitl > 0 ? "stat-warn" : "")">@_pendingHitl</div>
+        <div class="stat-label">Pending HITL</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">@_scheduledJobs</div>
+        <div class="stat-label">Scheduled Jobs</div>
+    </div>
+</div>
+
+<div class="section-header">
+    <h2>Recent Sessions</h2>
+    <a href="/sessions" class="link-subtle">View all →</a>
+</div>
+
+<SessionTable Sessions="@_recent" OnSelect="@(id => Nav.NavigateTo($"/sessions/{id}"))" />
+
+@code {
+    private int _activeSessions;
+    private int _totalSessions;
+    private int _pendingHitl;
+    private int _scheduledJobs;
+    private IEnumerable<ManagedSession> _recent = [];
+
+    protected override void OnInitialized()
+    {
+        Refresh();
+        SessionService.SessionListChanged += OnListChanged;
+        HitlBroker.PendingChanged         += OnPendingChanged;
+    }
+
+    private void Refresh()
+    {
+        var all      = SessionService.GetSessions().ToList();
+        _activeSessions = all.Count(s => s.Status is SessionStatus.Running or SessionStatus.Starting);
+        _totalSessions  = all.Count;
+        _pendingHitl    = HitlBroker.GetPending().Count;
+        _scheduledJobs  = ScheduleService.GetJobs().Count;
+        _recent         = all.Take(6);
+    }
+
+    private void GoToSessions()     => Nav.NavigateTo("/sessions");
+    private void OnListChanged()    => InvokeAsync(() => { Refresh(); StateHasChanged(); });
+    private void OnPendingChanged() => InvokeAsync(() => { _pendingHitl = HitlBroker.GetPending().Count; StateHasChanged(); });
+
+    public void Dispose()
+    {
+        SessionService.SessionListChanged -= OnListChanged;
+        HitlBroker.PendingChanged         -= OnPendingChanged;
+    }
+}

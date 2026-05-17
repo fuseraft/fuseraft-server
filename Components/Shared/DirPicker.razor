@@ -1,0 +1,76 @@
+@using System.IO
+
+<div class="dir-picker">
+    <div class="dir-picker-nav">
+        <button class="btn btn-sm" @onclick="GoUp"
+                disabled="@(_current == Path.GetPathRoot(_current))">↑ Up</button>
+        <span class="dir-picker-current" title="@_current">@_current</span>
+    </div>
+
+    @if (_error is not null)
+    {
+        <p class="dir-picker-error">@_error</p>
+    }
+
+    <div class="dir-picker-list">
+        @foreach (var dir in _dirs)
+        {
+            <button class="dir-picker-item" @onclick="() => Navigate(dir)">
+                <span class="dir-picker-icon">▶</span>@Path.GetFileName(dir)
+            </button>
+        }
+        @if (_dirs.Length == 0 && _error is null)
+        {
+            <p class="dir-picker-empty">No subdirectories</p>
+        }
+    </div>
+
+    <div class="dir-picker-footer">
+        <button class="btn btn-sm" @onclick="() => OnClose.InvokeAsync()">Cancel</button>
+        <button class="btn btn-sm btn-primary" @onclick="Confirm">Select this folder</button>
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback<string> OnSelect  { get; set; }
+    [Parameter] public EventCallback         OnClose   { get; set; }
+    [Parameter] public string                InitialPath { get; set; } = string.Empty;
+
+    private string   _current = string.Empty;
+    private string[] _dirs    = [];
+    private string?  _error;
+
+    protected override void OnInitialized()
+    {
+        _current = !string.IsNullOrEmpty(InitialPath) && Directory.Exists(InitialPath)
+            ? Path.GetFullPath(InitialPath)
+            : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        LoadDirs();
+    }
+
+    private void Navigate(string path) { _current = path; LoadDirs(); }
+
+    private void GoUp()
+    {
+        var parent = Directory.GetParent(_current)?.FullName;
+        if (parent is not null) { _current = parent; LoadDirs(); }
+    }
+
+    private void LoadDirs()
+    {
+        _error = null;
+        try
+        {
+            _dirs = Directory.GetDirectories(_current)
+                .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+        catch (Exception ex)
+        {
+            _dirs  = [];
+            _error = ex.Message;
+        }
+    }
+
+    private void Confirm() => OnSelect.InvokeAsync(_current);
+}

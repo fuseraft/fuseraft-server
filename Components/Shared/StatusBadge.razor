@@ -1,0 +1,25 @@
+<span class="status-badge @CssClass">@Label</span>
+
+@code {
+    [Parameter] public SessionStatus Status { get; set; }
+
+    private string Label => Status switch
+    {
+        SessionStatus.Starting  => "● Starting",
+        SessionStatus.Running   => "● Running",
+        SessionStatus.Succeeded => "✓ Complete",
+        SessionStatus.Failed    => "✗ Failed",
+        SessionStatus.Cancelled => "⊘ Cancelled",
+        _                       => "Idle",
+    };
+
+    private string CssClass => Status switch
+    {
+        SessionStatus.Starting  => "badge-blue badge-pulse",
+        SessionStatus.Running   => "badge-blue badge-pulse",
+        SessionStatus.Succeeded => "badge-ok",
+        SessionStatus.Failed    => "badge-err",
+        SessionStatus.Cancelled => "badge-muted",
+        _                       => "badge-muted",
+    };
+}

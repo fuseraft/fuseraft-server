@@ -1,0 +1,42 @@
+@using fuseraft.Server.Models
+
+<div class="table-wrapper">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Task</th>
+                <th>Status</th>
+                <th>Started</th>
+                <th>Duration</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var s in Sessions)
+            {
+                <tr class="@(OnSelect is not null ? "clickable" : "")"
+                    @onclick="() => OnSelect?.Invoke(s.SessionId)">
+                    <td><code class="id-cell">@s.SessionId</code></td>
+                    <td class="task-cell" title="@s.Task">@Truncate(s.Task, 90)</td>
+                    <td><StatusBadge Status="@s.Status" /></td>
+                    <td class="muted nowrap">@s.StartedAt.LocalDateTime.ToString("MM/dd HH:mm")</td>
+                    <td class="muted mono nowrap">@s.DurationLabel</td>
+                </tr>
+            }
+            @if (!Sessions.Any())
+            {
+                <tr>
+                    <td colspan="5" class="empty-row">No sessions found.</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    [Parameter] public IEnumerable<ManagedSession> Sessions { get; set; } = [];
+    [Parameter] public Action<string>? OnSelect { get; set; }
+
+    private static string Truncate(string s, int max) =>
+        s.Length <= max ? s : s[..max] + "…";
+}

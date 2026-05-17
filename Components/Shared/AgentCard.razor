@@ -1,0 +1,79 @@
+@using fuseraft.Core.Models
+
+<div class="agent-card @(IsUser ? "user-card" : "")">
+    <div class="card-header">
+        <span class="agent-pill"
+              style="background: @ColorHex22; color: @ColorHex;">
+            @Message.AgentName
+        </span>
+        <span class="turn-meta muted">Turn @(Message.TurnIndex + 1)</span>
+        <div class="card-stats">
+            @if (Elapsed.HasValue)
+            {
+                <span class="card-stat">@FormatMs(Elapsed.Value)</span>
+            }
+            @if (Message.Usage is { } u)
+            {
+                <span class="card-stat muted">in:@u.InputTokens.ToString("N0") out:@u.OutputTokens.ToString("N0")</span>
+            }
+        </div>
+    </div>
+    <div class="card-body">@((MarkupString)Rendered)</div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public AgentMessage Message { get; set; } = default!;
+    [Parameter]                 public TimeSpan?    Elapsed { get; set; }
+
+    private bool IsUser => Message.Role == "user";
+
+    // Deterministic color from agent name
+    private static readonly string[] Palette =
+    [
+        "#7c9ef8", "#f89c7c", "#7cf8b3", "#f8d87c",
+        "#c07cf8", "#f87ca7", "#7cf8e0", "#f8b87c",
+    ];
+
+    private string ColorHex
+    {
+        get
+        {
+            if (IsUser) return "#d29922";
+            var h = 0;
+            foreach (var c in (Message.AgentName ?? "?")) h = (h * 31 + c) & 0xffff;
+            return Palette[h % Palette.Length];
+        }
+    }
+
+    private string ColorHex22 => IsUser
+        ? "rgba(210,153,34,.12)"
+        : ColorHex + "22";
+
+    private string Rendered
+    {
+        get
+        {
+            var content = Message.Content ?? string.Empty;
+            // Escape HTML first
+            var s = System.Net.WebUtility.HtmlEncode(content);
+            // Fenced code blocks: ```lang\ncode\n```
+            s = System.Text.RegularExpressions.Regex.Replace(
+                s,
+                @"```(?:[^\n]*)&#xA;([\s\S]*?)```",
+                m => $"<pre><code>{m.Groups[1].Value}</code></pre>");
+            // Inline code
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"`([^`]+)`", "<code>$1</code>");
+            // Bold
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"\*\*(.+?)\*\*", "<strong>$1</strong>");
+            // Newlines → <br> (but not inside pre blocks)
+            s = System.Text.RegularExpressions.Regex.Replace(
+                s,
+                @"(?<!<pre[^>]*>.*?)&#xA;(?!.*?</pre>)",
+                "<br>");
+            return s;
+        }
+    }
+
+    private static string FormatMs(TimeSpan t) =>
+        t.TotalSeconds < 1 ? $"{(int)t.TotalMilliseconds}ms" : $"{t.TotalSeconds:F1}s";
+}

@@ -1,0 +1,120 @@
+@page "/schedule"
+@inject ScheduleService ScheduleService
+
+<PageTitle>Schedule — Fuseraft</PageTitle>
+
+<div class="page-header">
+    <h1>Scheduled Jobs</h1>
+    <button class="btn btn-primary" @onclick="() => { _showAdd = true; _addError = null; }">+ Add Job</button>
+</div>
+
+@if (_showAdd)
+{
+    <div class="dialog-backdrop" @onclick="CloseAdd">
+        <div class="dialog" @onclick:stopPropagation>
+            <div class="dialog-header">
+                <h2>Add Scheduled Job</h2>
+                <button class="btn-icon" @onclick="CloseAdd">✕</button>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Job Name</label>
+                <input @bind="_addName" class="input" placeholder="nightly-audit" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Cron Expression</label>
+                <input @bind="_addCron" class="input" placeholder="0 2 * * *" />
+                <p class="form-hint">5-field cron. E.g. <code>0 2 * * *</code> = 2 AM UTC daily.</p>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Task</label>
+                <textarea @bind="_addTask" rows="3" class="input"
+                          placeholder="Task description passed to the agent team…"></textarea>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Config Path <span class="form-optional">(optional)</span></label>
+                <input @bind="_addConfig" class="input" placeholder="config/orchestration.yaml" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Description <span class="form-optional">(optional)</span></label>
+                <input @bind="_addDesc" class="input" placeholder="Short description…" />
+            </div>
+            @if (_addError is not null)
+            {
+                <div class="error-banner">@_addError</div>
+            }
+            <div class="dialog-footer">
+                <button class="btn" @onclick="CloseAdd">Cancel</button>
+                <button class="btn btn-primary" @onclick="AddAsync" disabled="@_adding">
+                    @(_adding ? "Adding…" : "Add Job")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<ScheduleTable Jobs="@_jobs"
+               OnRemove="@RemoveJob"
+               OnToggle="@HandleToggle" />
+
+@code {
+    private List<ScheduledJob> _jobs = [];
+    private bool   _showAdd = false;
+    private bool   _adding  = false;
+    private string _addName = string.Empty;
+    private string _addCron = string.Empty;
+    private string _addTask = string.Empty;
+    private string _addConfig = string.Empty;
+    private string _addDesc = string.Empty;
+    private string? _addError;
+
+    protected override void OnInitialized() => LoadJobs();
+
+    private void LoadJobs() => _jobs = [..ScheduleService.GetJobs()];
+
+    private void CloseAdd()
+    {
+        _showAdd = false;
+        _addError = null;
+    }
+
+    private async Task AddAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_addName)) { _addError = "Name is required.";          return; }
+        if (string.IsNullOrWhiteSpace(_addCron)) { _addError = "Cron expression is required."; return; }
+        if (string.IsNullOrWhiteSpace(_addTask)) { _addError = "Task is required.";           return; }
+
+        _adding   = true;
+        _addError = null;
+        StateHasChanged();
+
+        try
+        {
+            await ScheduleService.AddJobAsync(
+                _addName, _addCron, _addTask,
+                string.IsNullOrWhiteSpace(_addConfig) ? null : _addConfig,
+                string.IsNullOrWhiteSpace(_addDesc)   ? null : _addDesc);
+            _showAdd = false;
+            (_addName, _addCron, _addTask, _addConfig, _addDesc) = (string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
+            LoadJobs();
+        }
+        catch (Exception ex) { _addError = ex.Message; }
+        finally { _adding = false; }
+    }
+
+    private void RemoveJob(string name)
+    {
+        ScheduleService.RemoveJob(name);
+        LoadJobs();
+        StateHasChanged();
+    }
+
+    private void HandleToggle((string Name, bool Enabled) args) => _ = ToggleAsync(args);
+
+    private async Task ToggleAsync((string Name, bool Enabled) args)
+    {
+        try { await ScheduleService.ToggleJobAsync(args.Name, args.Enabled); }
+        catch { /* best-effort */ }
+        LoadJobs();
+        StateHasChanged();
+    }
+}

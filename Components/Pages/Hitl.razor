@@ -1,0 +1,166 @@
+@page "/hitl"
+@implements IDisposable
+@inject HitlBroker Broker
+
+<PageTitle>HITL — Fuseraft</PageTitle>
+
+<div class="page-header">
+    <h1>Human-in-the-Loop</h1>
+    @if (_pending.Count > 0)
+    {
+        <span class="count-badge">@_pending.Count pending</span>
+    }
+</div>
+
+@if (_pending.Count == 0)
+{
+    <div class="empty-state">
+        <div class="empty-icon">✓</div>
+        <p>No pending approvals.</p>
+        <p class="muted">Requests will appear here when a session is running in HITL mode
+           or when an agent needs your input.</p>
+    </div>
+}
+else
+{
+    @foreach (var req in _pending)
+    {
+        <div class="hitl-card">
+            <div class="hitl-card-header">
+                <span class="hitl-type-badge hitl-@req.Type.ToString().ToLower()">@req.Type</span>
+                <a href="/sessions/@req.SessionId" class="hitl-session-link">@req.SessionId</a>
+                <span class="muted hitl-age">@FormatAge(req.Created)</span>
+            </div>
+
+            <div class="hitl-prompt">@((MarkupString)FormatPrompt(req.Prompt))</div>
+
+            <div class="hitl-response-area">
+                @if (req.Type is HitlRequestType.Continue or HitlRequestType.PostSession)
+                {
+                    <input class="input hitl-input"
+                           @bind="_inputs[req.Id]"
+                           placeholder="Optional redirect message (leave empty to continue)…" />
+                    <div class="hitl-actions">
+                        <button class="btn btn-primary" @onclick="() => RespondContinue(req.Id)">
+                            Continue ↵
+                        </button>
+                        @if (!string.IsNullOrWhiteSpace(GetInput(req.Id)))
+                        {
+                            <button class="btn" @onclick="() => RespondRedirect(req.Id)">
+                                Send Redirect
+                            </button>
+                        }
+                        <button class="btn btn-danger" @onclick="() => RespondAbort(req.Id)">
+                            End Session
+                        </button>
+                    </div>
+                }
+                else if (req.Type is HitlRequestType.RouteApproval or HitlRequestType.ShellApproval)
+                {
+                    <div class="hitl-actions">
+                        <button class="btn btn-primary" @onclick="() => RespondApprove(req.Id)">
+                            ✓ Approve
+                        </button>
+                        <button class="btn btn-danger" @onclick="() => RespondAbort(req.Id)">
+                            ✕ Deny
+                        </button>
+                    </div>
+                }
+                else if (req.Type == HitlRequestType.Redirect)
+                {
+                    <input class="input hitl-input"
+                           @bind="_inputs[req.Id]"
+                           placeholder="Redirect message for the agent…" />
+                    <div class="hitl-actions">
+                        <button class="btn btn-primary"
+                                disabled="@string.IsNullOrWhiteSpace(GetInput(req.Id))"
+                                @onclick="() => RespondRedirect(req.Id)">
+                            Send Redirect
+                        </button>
+                        <button class="btn btn-danger" @onclick="() => RespondAbort(req.Id)">
+                            Abort Session
+                        </button>
+                    </div>
+                }
+                else if (req.Type == HitlRequestType.PlanReview)
+                {
+                    <input class="input hitl-input"
+                           @bind="_inputs[req.Id]"
+                           placeholder="Revision feedback (leave empty to approve as-is)…" />
+                    <div class="hitl-actions">
+                        <button class="btn btn-primary" @onclick="() => RespondApprovePlan(req.Id)">
+                            ✓ Approve Plan
+                        </button>
+                        @if (!string.IsNullOrWhiteSpace(GetInput(req.Id)))
+                        {
+                            <button class="btn" @onclick="() => RespondRedirect(req.Id)">
+                                Request Revision
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private List<PendingApproval> _pending = [];
+    private Dictionary<Guid, string> _inputs = new();
+
+    protected override void OnInitialized()
+    {
+        RefreshPending();
+        Broker.PendingChanged += OnPendingChanged;
+    }
+
+    private void RefreshPending()
+    {
+        _pending = [..Broker.GetPending()];
+        foreach (var req in _pending)
+            _inputs.TryAdd(req.Id, string.Empty);
+    }
+
+    private void OnPendingChanged() =>
+        InvokeAsync(() => { RefreshPending(); StateHasChanged(); });
+
+    private string GetInput(Guid id) =>
+        _inputs.TryGetValue(id, out var v) ? v : string.Empty;
+
+    private void RespondContinue(Guid id) =>
+        Broker.Respond(id, new HitlResponse(HitlAction.Continue));
+
+    private void RespondApprove(Guid id) =>
+        Broker.Respond(id, new HitlResponse(HitlAction.Approve));
+
+    private void RespondApprovePlan(Guid id) =>
+        Broker.Respond(id, new HitlResponse(HitlAction.Approve));
+
+    private void RespondAbort(Guid id) =>
+        Broker.Respond(id, new HitlResponse(HitlAction.Abort));
+
+    private void RespondRedirect(Guid id)
+    {
+        var msg = GetInput(id);
+        Broker.Respond(id, new HitlResponse(HitlAction.Respond, msg));
+    }
+
+    private static string FormatAge(DateTimeOffset created)
+    {
+        var age = DateTimeOffset.UtcNow - created;
+        return age.TotalMinutes < 1 ? "just now"
+             : age.TotalHours   < 1 ? $"{(int)age.TotalMinutes}m ago"
+             :                        $"{(int)age.TotalHours}h ago";
+    }
+
+    private static string FormatPrompt(string prompt)
+    {
+        // Render code blocks in the prompt as <pre>
+        var escaped = System.Net.WebUtility.HtmlEncode(prompt);
+        escaped = System.Text.RegularExpressions.Regex.Replace(
+            escaped, @"`([^`]+)`", "<code>$1</code>");
+        return escaped.Replace("\n", "<br>");
+    }
+
+    public void Dispose() => Broker.PendingChanged -= OnPendingChanged;
+}

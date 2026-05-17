@@ -1,0 +1,63 @@
+@using fuseraft.Core.Models
+
+<div class="table-wrapper">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Cron</th>
+                <th>Next Run (UTC)</th>
+                <th>Last Run</th>
+                <th>Enabled</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var job in Jobs)
+            {
+                var isDue = job.Enabled && job.NextRun <= DateTimeOffset.UtcNow;
+                <tr>
+                    <td>
+                        <span class="mono">@job.Name</span>
+                        @if (!string.IsNullOrWhiteSpace(job.Description))
+                        {
+                            <span class="muted small"> — @job.Description</span>
+                        }
+                    </td>
+                    <td><code class="muted">@job.Cron</code></td>
+                    <td class="@(isDue ? "text-warn" : "muted") nowrap">
+                        @(job.NextRun?.ToString("MM/dd HH:mm") ?? "—")
+                        @if (isDue) { <span class="due-badge">due</span> }
+                    </td>
+                    <td class="muted nowrap">@(job.LastRun?.ToString("MM/dd HH:mm") ?? "never")</td>
+                    <td>
+                        <button class="toggle-btn @(job.Enabled ? "toggle-on" : "toggle-off")"
+                                @onclick="() => OnToggle?.Invoke((job.Name, !job.Enabled))">
+                            @(job.Enabled ? "On" : "Off")
+                        </button>
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-danger"
+                                @onclick="() => OnRemove?.Invoke(job.Name)">
+                            Remove
+                        </button>
+                    </td>
+                </tr>
+            }
+            @if (!Jobs.Any())
+            {
+                <tr>
+                    <td colspan="6" class="empty-row">
+                        No scheduled jobs. Click "+ Add Job" or use <code>fuseraft schedule add</code>.
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    [Parameter] public IEnumerable<ScheduledJob> Jobs   { get; set; } = [];
+    [Parameter] public Action<string>?            OnRemove { get; set; }
+    [Parameter] public Action<(string Name, bool Enabled)>? OnToggle { get; set; }
+}
