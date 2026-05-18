@@ -1,0 +1,223 @@
+@page "/context"
+@inject ContextService ContextService
+
+<PageTitle>Context — Fuseraft</PageTitle>
+
+<div class="page-header">
+    <h1>Context</h1>
+    @if (!string.IsNullOrWhiteSpace(_workspace))
+    {
+        <button class="btn btn-primary" @onclick="OpenAdd">+ Add Item</button>
+    }
+</div>
+
+<div class="form-group" style="max-width:600px">
+    <label class="form-label">Workspace Directory</label>
+    <div class="input-with-btn">
+        <input @bind="_workspace" @bind:event="oninput" class="input" placeholder="/home/user/myproject" />
+        <button class="btn btn-sm" @onclick="TogglePicker">Browse…</button>
+        <button class="btn btn-sm btn-primary" @onclick="LoadAsync">Load</button>
+    </div>
+    @if (_showPicker)
+    {
+        <DirPicker InitialPath="@_workspace" OnSelect="OnDirSelected" OnClose="ClosePicker" />
+    }
+    <p class="form-hint">Context items are stored in <code>.fuseraft/context/</code> inside this directory.</p>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_workspace))
+{
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_loadError is not null)
+    {
+        <div class="error-banner">@_loadError</div>
+    }
+    else if (_index is null || _index.Items.Count == 0)
+    {
+        <div class="empty-state">
+            <div class="empty-icon">📂</div>
+            <p>No context items in this workspace.</p>
+            <p class="muted">Use "+ Add Item" to import a file or directory.</p>
+        </div>
+    }
+    else
+    {
+        <div class="table-wrapper">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Files</th>
+                        <th>Size</th>
+                        <th>Imported</th>
+                        <th>Description</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var entry in _index.Items.OrderBy(x => x.Key))
+                    {
+                        var item = entry.Value;
+                        var totalBytes = item.Files.Sum(f => f.SizeBytes);
+                        <tr>
+                            <td><span class="mono">@item.Name</span></td>
+                            <td class="muted">@item.Files.Count</td>
+                            <td class="muted nowrap">@FormatSize(totalBytes)</td>
+                            <td class="muted nowrap">@item.ImportedAt.ToString("yyyy-MM-dd")</td>
+                            <td class="muted">@(item.Description ?? "—")</td>
+                            <td>
+                                <button class="btn btn-sm btn-danger"
+                                        @onclick="() => RemoveItem(item.Name)">
+                                    Remove
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@if (_showAdd)
+{
+    <div class="dialog-backdrop" @onclick="CloseAdd">
+        <div class="dialog" @onclick:stopPropagation>
+            <div class="dialog-header">
+                <h2>Add Context Item</h2>
+                <button class="btn-icon" @onclick="CloseAdd">✕</button>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Source Path</label>
+                <input @bind="_addSource" class="input" placeholder="/path/to/file-or-directory" />
+                <p class="form-hint">Absolute path to the file or directory to import.</p>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Name <span class="form-optional">(optional)</span></label>
+                <input @bind="_addName" class="input" placeholder="my-docs" />
+                <p class="form-hint">Short alias used by agents. Defaults to the filename without extension.</p>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Description <span class="form-optional">(optional)</span></label>
+                <input @bind="_addDesc" class="input" placeholder="API reference docs…" />
+            </div>
+            @if (_addError is not null)
+            {
+                <div class="error-banner">@_addError</div>
+            }
+            <div class="dialog-footer">
+                <button class="btn" @onclick="CloseAdd">Cancel</button>
+                <button class="btn btn-primary" @onclick="AddAsync" disabled="@_adding">
+                    @(_adding ? "Importing…" : "Import")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string  _workspace  = string.Empty;
+    private bool    _showPicker = false;
+    private bool    _loading    = false;
+    private string? _loadError;
+
+    private fuseraft.Infrastructure.ContextIndex? _index;
+
+    private bool    _showAdd   = false;
+    private bool    _adding    = false;
+    private string  _addSource = string.Empty;
+    private string  _addName   = string.Empty;
+    private string  _addDesc   = string.Empty;
+    private string? _addError;
+
+    private void TogglePicker()   { _showPicker = !_showPicker; }
+    private void ClosePicker()    { _showPicker = false; }
+
+    private void OnDirSelected(string path)
+    {
+        _workspace  = path;
+        _showPicker = false;
+        _ = LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_workspace)) { _index = null; return; }
+        _loading   = true;
+        _loadError = null;
+        StateHasChanged();
+        try
+        {
+            _index = await ContextService.GetIndexAsync(_workspace.Trim());
+        }
+        catch (Exception ex)
+        {
+            _loadError = ex.Message;
+            _index = null;
+        }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private void OpenAdd()
+    {
+        _showAdd  = true;
+        _addError = null;
+        _addSource = _addName = _addDesc = string.Empty;
+    }
+
+    private void CloseAdd() { _showAdd = false; _addError = null; }
+
+    private async Task AddAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_addSource)) { _addError = "Source path is required."; return; }
+
+        _adding   = true;
+        _addError = null;
+        StateHasChanged();
+        try
+        {
+            var name = string.IsNullOrWhiteSpace(_addName)
+                ? DeriveNameFromPath(_addSource.Trim())
+                : _addName.Trim();
+
+            await ContextService.AddAsync(
+                _workspace.Trim(), _addSource.Trim(), name,
+                string.IsNullOrWhiteSpace(_addDesc) ? null : _addDesc.Trim());
+            _showAdd = false;
+            await LoadAsync();
+        }
+        catch (Exception ex) { _addError = ex.Message; }
+        finally { _adding = false; StateHasChanged(); }
+    }
+
+    private void RemoveItem(string name) => _ = RemoveAsync(name);
+
+    private async Task RemoveAsync(string name)
+    {
+        try
+        {
+            await ContextService.RemoveAsync(_workspace.Trim(), name);
+            await LoadAsync();
+        }
+        catch (Exception ex) { _loadError = ex.Message; StateHasChanged(); }
+    }
+
+    private static string DeriveNameFromPath(string path)
+    {
+        var leaf = File.Exists(path)
+            ? Path.GetFileNameWithoutExtension(path)
+            : Path.GetFileName(path.TrimEnd('/', '\\'));
+        return new string(leaf.Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '-').ToArray()).Trim('-');
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes < 1_024)         return $"{bytes} B";
+        if (bytes < 1_048_576)     return $"{bytes / 1_024.0:F1} KB";
+        if (bytes < 1_073_741_824) return $"{bytes / 1_048_576.0:F1} MB";
+        return $"{bytes / 1_073_741_824.0:F1} GB";
+    }
+}

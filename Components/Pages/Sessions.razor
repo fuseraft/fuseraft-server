@@ -72,7 +72,10 @@
     }
 </div>
 
-<SessionTable Sessions="@Filtered" OnSelect="@(id => Nav.NavigateTo($"/sessions/{id}"))" />
+<SessionTable Sessions="@Filtered"
+              OnSelect="@(id => Nav.NavigateTo($"/sessions/{id}"))"
+              OnDelete="@DeleteSession"
+              OnResume="@ResumeSessionAsync" />
 
 @code {
     private bool   _showNew       = false;
@@ -142,6 +145,21 @@
         {
             _starting = false;
         }
+    }
+
+    private void DeleteSession(string sessionId)
+    {
+        _ = SessionService.DeleteSessionAsync(sessionId);
+    }
+
+    private async Task ResumeSessionAsync(string sessionId)
+    {
+        try
+        {
+            var id = await SessionService.ResumeSessionAsync(sessionId);
+            Nav.NavigateTo($"/sessions/{id}");
+        }
+        catch { /* session may have been deleted; list will refresh */ }
     }
 
     public void Dispose() => SessionService.SessionListChanged -= OnListChanged;

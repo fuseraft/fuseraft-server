@@ -10,6 +10,7 @@
                 <th>Last Run</th>
                 <th>Enabled</th>
                 <th></th>
+                @if (OnRun is not null) { <th></th> }
             </tr>
         </thead>
         <tbody>
@@ -42,12 +43,21 @@
                             Remove
                         </button>
                     </td>
+                    @if (OnRun is not null)
+                    {
+                        <td>
+                            <button class="btn btn-sm btn-primary"
+                                    @onclick="() => OnRun(job.Name)">
+                                Run
+                            </button>
+                        </td>
+                    }
                 </tr>
             }
             @if (!Jobs.Any())
             {
                 <tr>
-                    <td colspan="6" class="empty-row">
+                    <td colspan="@(OnRun is not null ? 7 : 6)" class="empty-row">
                         No scheduled jobs. Click "+ Add Job" or use <code>fuseraft schedule add</code>.
                     </td>
                 </tr>
@@ -57,7 +67,8 @@
 </div>
 
 @code {
-    [Parameter] public IEnumerable<ScheduledJob> Jobs   { get; set; } = [];
+    [Parameter] public IEnumerable<ScheduledJob> Jobs    { get; set; } = [];
     [Parameter] public Action<string>?            OnRemove { get; set; }
     [Parameter] public Action<(string Name, bool Enabled)>? OnToggle { get; set; }
+    [Parameter] public Action<string>?            OnRun  { get; set; }
 }

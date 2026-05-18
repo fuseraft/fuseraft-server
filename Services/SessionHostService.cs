@@ -116,6 +116,43 @@ public sealed class SessionHostService : IDisposable
         }
     }
 
+    public async Task DeleteSessionAsync(string sessionId)
+    {
+        if (_sessions.TryRemove(sessionId, out var s))
+        {
+            s.Cts?.Cancel();
+            _hitlBroker.CancelSession(sessionId);
+        }
+        await _sessionStore.DeleteAsync(sessionId);
+        SessionListChanged?.Invoke();
+    }
+
+    public async Task<string> ResumeSessionAsync(string sessionId)
+    {
+        var checkpoint = await _sessionStore.LoadAsync(sessionId)
+            ?? throw new InvalidOperationException($"Session '{sessionId}' not found.");
+        if (checkpoint.IsComplete)
+            throw new InvalidOperationException($"Session '{sessionId}' is already complete.");
+
+        var cts = new CancellationTokenSource();
+        var session = new ManagedSession
+        {
+            SessionId      = checkpoint.SessionId,
+            Task           = checkpoint.Task ?? string.Empty,
+            ConfigPath     = checkpoint.ConfigPath ?? string.Empty,
+            Status         = SessionStatus.Starting,
+            StartedAt      = checkpoint.LastUpdatedAt,
+            Cts            = cts,
+            ResumeMessages = checkpoint.Messages.ToList(),
+        };
+
+        _sessions[checkpoint.SessionId] = session;
+        SessionListChanged?.Invoke();
+
+        _ = Task.Run(() => RunSessionAsync(session, cts.Token), CancellationToken.None);
+        return checkpoint.SessionId;
+    }
+
     private void Emit(ManagedSession session, SessionEvent evt)
     {
         session.AddEvent(evt);
@@ -149,6 +186,17 @@ public sealed class SessionHostService : IDisposable
                 Task       = session.Task,
                 ConfigPath = absConfig,
             };
+
+            // Seed prior history when resuming so StreamAsync continues where it left off
+            if (session.ResumeMessages.Count > 0)
+            {
+                checkpoint.Messages.AddRange(session.ResumeMessages);
+                foreach (var msg in session.ResumeMessages)
+                {
+                    session.AddMessage(msg);
+                    session.AddEvent(new SessionEvent { Type = "message", Message = msg });
+                }
+            }
 
             eventEmitter?.SetSessionId(session.SessionId);
             orchestrator.SetSessionId(session.SessionId);

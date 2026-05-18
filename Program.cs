@@ -13,6 +13,8 @@ builder.Services.AddSingleton<SessionHostService>();
 builder.Services.AddSingleton<ScheduleService>();
 builder.Services.AddSingleton<OrchestrationTemplateService>();
 builder.Services.AddSingleton<PluginCatalogService>();
+builder.Services.AddSingleton<ContextService>();
+builder.Services.AddSingleton<ConfigService>();
 
 var app = builder.Build();
 

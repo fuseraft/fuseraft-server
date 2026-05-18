@@ -1,0 +1,203 @@
+@page "/configs"
+@inject ConfigService ConfigService
+
+<PageTitle>Configs — Fuseraft</PageTitle>
+
+<div class="page-header">
+    <h1>Config Files</h1>
+</div>
+
+<div class="form-group" style="max-width:680px">
+    <label class="form-label">Directory or File Path</label>
+    <div class="input-with-btn">
+        <input @bind="_path" @bind:event="oninput" class="input"
+               placeholder="/path/to/project or /path/to/config.yaml" />
+        <button class="btn btn-sm" @onclick="TogglePicker">Browse…</button>
+        <button class="btn btn-sm btn-primary" @onclick="Search">Scan</button>
+    </div>
+    @if (_showPicker)
+    {
+        <DirPicker InitialPath="@_path" OnSelect="OnDirSelected" OnClose="() => _showPicker = false" />
+    }
+</div>
+
+@if (_scanning)
+{
+    <p class="muted">Scanning…</p>
+}
+else if (_configs is not null)
+{
+    @if (_configs.Count == 0)
+    {
+        <div class="empty-state">
+            <div class="empty-icon">🗂</div>
+            <p>No config files found.</p>
+            <p class="muted">Only <code>.yaml</code>, <code>.yml</code>, and <code>.json</code> files are scanned.</p>
+        </div>
+    }
+    else
+    {
+        <div class="table-wrapper" style="margin-bottom:1.5rem">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>File</th>
+                        <th>Name</th>
+                        <th>Agents</th>
+                        <th>Selection</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var cfg in _configs)
+                    {
+                        <tr class="@(_selected?.Path == cfg.Path ? "row-selected" : "clickable")"
+                            @onclick="() => SelectConfig(cfg.Path)">
+                            <td class="mono small">@cfg.Path</td>
+                            <td>
+                                @if (cfg.Error is not null)
+                                {
+                                    <span class="text-danger">parse error</span>
+                                }
+                                else
+                                {
+                                    @cfg.Name
+                                }
+                            </td>
+                            <td class="muted small">@(cfg.Error is null ? string.Join(", ", cfg.AgentNames) : "—")</td>
+                            <td class="muted">@cfg.SelectionType</td>
+                            <td>
+                                @if (cfg.Error is null)
+                                {
+                                    <button class="btn btn-sm" @onclick:stopPropagation
+                                            @onclick="() => ValidateConfig(cfg.Path)">
+                                        Validate
+                                    </button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@if (_validating)
+{
+    <p class="muted">Validating…</p>
+}
+else if (_validation is not null)
+{
+    <div class="config-validate-panel">
+        <div class="config-validate-header">
+            <h2>@(_validation.Summary?.Name ?? "Validation") — @(_validation.Valid ? "✓ Valid" : "✗ Invalid")</h2>
+            <span class="muted small">@_validation.Summary?.Path</span>
+        </div>
+
+        @if (_validation.Summary is { } s)
+        {
+            <div class="config-details">
+                @if (!string.IsNullOrWhiteSpace(s.Description))
+                {
+                    <p class="muted">@s.Description</p>
+                }
+                <div class="config-agents">
+                    @foreach (var a in s.AgentNames)
+                    {
+                        <span class="agent-chip">@a</span>
+                    }
+                </div>
+                <p class="muted small">Selection: <strong>@s.SelectionType</strong></p>
+            </div>
+        }
+
+        @if (_validation.Issues.Count == 0)
+        {
+            <p class="text-success">No issues found.</p>
+        }
+        else
+        {
+            <ul class="issue-list">
+                @foreach (var (level, msg) in _validation.Issues)
+                {
+                    <li class="issue-@level">
+                        <span class="issue-icon">@(level == "error" ? "✗" : "⚠")</span>
+                        @msg
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+}
+
+@code {
+    private string  _path       = string.Empty;
+    private bool    _showPicker = false;
+    private bool    _scanning   = false;
+    private bool    _validating = false;
+
+    private List<ConfigSummary>?    _configs    = null;
+    private ConfigSummary?          _selected   = null;
+    private ConfigValidationResult? _validation = null;
+
+    private void TogglePicker() { _showPicker = !_showPicker; }
+
+    private void OnDirSelected(string path)
+    {
+        _path       = path;
+        _showPicker = false;
+        Search();
+    }
+
+    private void Search()
+    {
+        if (string.IsNullOrWhiteSpace(_path)) return;
+        var trimmed = _path.Trim();
+
+        _scanning   = true;
+        _validation = null;
+        _selected   = null;
+        StateHasChanged();
+
+        try
+        {
+            // If a file was typed directly, validate it immediately
+            if (File.Exists(trimmed))
+            {
+                _configs = [ConfigService.ListConfigs(Path.GetDirectoryName(trimmed) ?? trimmed)
+                    .FirstOrDefault(c => c.Path == trimmed)
+                    ?? new ConfigSummary(trimmed, Path.GetFileName(trimmed), string.Empty, [], "?")];
+                ValidateConfig(trimmed);
+            }
+            else
+            {
+                _configs = ConfigService.ListConfigs(trimmed);
+            }
+        }
+        catch (Exception ex)
+        {
+            _configs = [];
+            _ = ex; // scan errors surfaced per-file in ConfigService
+        }
+        finally { _scanning = false; StateHasChanged(); }
+    }
+
+    private void SelectConfig(string path)
+    {
+        _selected = _configs?.FirstOrDefault(c => c.Path == path);
+        StateHasChanged();
+    }
+
+    private void ValidateConfig(string path)
+    {
+        _validating = true;
+        StateHasChanged();
+        try
+        {
+            _validation = ConfigService.Validate(path);
+            _selected   = _configs?.FirstOrDefault(c => c.Path == path);
+        }
+        finally { _validating = false; StateHasChanged(); }
+    }
+}

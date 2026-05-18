@@ -21,6 +21,9 @@ public sealed class ManagedSession
     // Null for sessions loaded from history (not currently running)
     public CancellationTokenSource? Cts { get; set; }
 
+    // Pre-existing messages to seed the checkpoint with when resuming a session
+    public IReadOnlyList<AgentMessage> ResumeMessages { get; init; } = [];
+
     public void AddEvent(SessionEvent evt)                          { lock (_syncLock) _events.Add(evt); }
     public void AddMessage(AgentMessage msg)                        { lock (_syncLock) _messages.Add(msg); }
     public void AddMessages(IEnumerable<AgentMessage> msgs)         { lock (_syncLock) _messages.AddRange(msgs); }

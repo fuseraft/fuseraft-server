@@ -91,6 +91,23 @@ public sealed class ScheduleService
         await File.WriteAllTextAsync(jobPath, _serializer.Serialize(job));
     }
 
+    public async Task UpdateJobRunAsync(string name)
+    {
+        var jobPath = Path.Combine(FuseraftPaths.GlobalSchedule, $"{Slugify(name)}.yaml");
+        if (!File.Exists(jobPath)) return;
+
+        var job = _deserializer.Deserialize<ScheduledJob>(await File.ReadAllTextAsync(jobPath))
+            ?? throw new InvalidOperationException($"Job file for '{name}' is empty or corrupt.");
+
+        job.LastRun = DateTimeOffset.UtcNow;
+
+        CronExpression? cronExpr = null;
+        try { cronExpr = CronExpression.Parse(job.Cron); } catch { }
+        job.NextRun = cronExpr?.GetNextOccurrence(DateTimeOffset.UtcNow, TimeZoneInfo.Utc);
+
+        await File.WriteAllTextAsync(jobPath, _serializer.Serialize(job));
+    }
+
     private static string Slugify(string name) =>
         System.Text.RegularExpressions.Regex
             .Replace(name.Trim().ToLowerInvariant(), @"[^a-z0-9]+", "-")

@@ -9,11 +9,14 @@
                 <th>Status</th>
                 <th>Started</th>
                 <th>Duration</th>
+                @if (OnDelete is not null || OnResume is not null) { <th></th> }
             </tr>
         </thead>
         <tbody>
             @foreach (var s in Sessions)
             {
+                var canResume = s.Status == SessionStatus.Idle && OnResume is not null;
+                var canDelete = s.Status is not (SessionStatus.Running or SessionStatus.Starting) && OnDelete is not null;
                 <tr class="@(OnSelect is not null ? "clickable" : "")"
                     @onclick="() => OnSelect?.Invoke(s.SessionId)">
                     <td><code class="id-cell">@s.SessionId</code></td>
@@ -21,12 +24,25 @@
                     <td><StatusBadge Status="@s.Status" /></td>
                     <td class="muted nowrap">@s.StartedAt.LocalDateTime.ToString("MM/dd HH:mm")</td>
                     <td class="muted mono nowrap">@s.DurationLabel</td>
+                    @if (OnDelete is not null || OnResume is not null)
+                    {
+                        <td class="row-actions" @onclick:stopPropagation>
+                            @if (canResume)
+                            {
+                                <button class="btn btn-sm" @onclick="() => OnResume!(s.SessionId)">Resume</button>
+                            }
+                            @if (canDelete)
+                            {
+                                <button class="btn btn-sm btn-danger" @onclick="() => OnDelete!(s.SessionId)">Delete</button>
+                            }
+                        </td>
+                    }
                 </tr>
             }
             @if (!Sessions.Any())
             {
                 <tr>
-                    <td colspan="5" class="empty-row">No sessions found.</td>
+                    <td colspan="@(OnDelete is not null || OnResume is not null ? 6 : 5)" class="empty-row">No sessions found.</td>
                 </tr>
             }
         </tbody>
@@ -35,7 +51,9 @@
 
 @code {
     [Parameter] public IEnumerable<ManagedSession> Sessions { get; set; } = [];
-    [Parameter] public Action<string>? OnSelect { get; set; }
+    [Parameter] public Action<string>? OnSelect  { get; set; }
+    [Parameter] public Action<string>? OnDelete  { get; set; }
+    [Parameter] public Func<string, Task>? OnResume { get; set; }
 
     private static string Truncate(string s, int max) =>
         s.Length <= max ? s : s[..max] + "…";
