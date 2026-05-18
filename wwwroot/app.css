@@ -1192,3 +1192,93 @@ code, pre, .mono { font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Menlo, 
   color: var(--muted);
   line-height: 1.55;
 }
+
+/* ===== Session table row actions ===== */
+.row-actions {
+  white-space: nowrap;
+  text-align: right;
+  padding-right: 10px !important;
+}
+
+.row-actions .btn { margin-left: 4px; }
+
+/* ===== Table row highlight (Configs) ===== */
+.data-table tbody tr.row-selected { background: var(--accent-dim); }
+.data-table tbody tr.row-selected td { color: var(--text); }
+
+/* ===== Colour helpers ===== */
+.text-success { color: var(--ok); }
+.text-danger  { color: var(--err); }
+
+/* ===== Config validate panel ===== */
+.config-validate-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.config-validate-header {
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface2);
+}
+
+.config-validate-header h2 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.config-details {
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid var(--border2);
+}
+
+.config-agents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.agent-chip {
+  font-size: 11px;
+  padding: 2px 9px;
+  border-radius: 99px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace;
+}
+
+/* ===== Validation issue list ===== */
+.issue-list {
+  list-style: none;
+  padding: 12px 0;
+}
+
+.issue-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 18px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border2);
+  line-height: 1.5;
+}
+
+.issue-list li:last-child { border-bottom: none; }
+
+.issue-error   { background: rgba(248,81,73,.04);  color: var(--text); }
+.issue-warning { background: rgba(210,153,34,.04); color: var(--text); }
+
+.issue-icon {
+  font-size: 12px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.issue-error   .issue-icon { color: var(--err); }
+.issue-warning .issue-icon { color: var(--warn); }
