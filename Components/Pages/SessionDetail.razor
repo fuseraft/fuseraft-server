@@ -63,7 +63,7 @@
         _session = SessionService.GetSession(SessionId);
         if (_session is not null)
         {
-            _events = [.._session.Events];
+            _events = _session.SnapshotEvents();
             SessionService.EventFired += OnEvent;
         }
     }

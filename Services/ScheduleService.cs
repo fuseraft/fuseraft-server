@@ -85,7 +85,8 @@ public sealed class ScheduleService
         if (!File.Exists(jobPath))
             throw new FileNotFoundException($"Job '{name}' not found.");
 
-        var job = _deserializer.Deserialize<ScheduledJob>(await File.ReadAllTextAsync(jobPath));
+        var job = _deserializer.Deserialize<ScheduledJob>(await File.ReadAllTextAsync(jobPath))
+            ?? throw new InvalidOperationException($"Job file for '{name}' is empty or corrupt.");
         job.Enabled = enabled;
         await File.WriteAllTextAsync(jobPath, _serializer.Serialize(job));
     }

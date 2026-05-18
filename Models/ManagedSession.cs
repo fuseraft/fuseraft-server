@@ -4,6 +4,10 @@ namespace fuseraft.Server.Models;
 
 public sealed class ManagedSession
 {
+    private readonly object _syncLock = new();
+    private readonly List<AgentMessage> _messages = [];
+    private readonly List<SessionEvent> _events   = [];
+
     public required string   SessionId    { get; init; }
     public required string   Task         { get; init; }
     public required string   ConfigPath   { get; init; }
@@ -13,11 +17,14 @@ public sealed class ManagedSession
     public DateTimeOffset?   EndedAt      { get; set; }
     public bool?             Succeeded    { get; set; }
     public string?           ErrorMessage { get; set; }
-    public List<AgentMessage> Messages    { get; init; } = [];
-    public List<SessionEvent> Events      { get; init; } = [];
 
     // Null for sessions loaded from history (not currently running)
     public CancellationTokenSource? Cts { get; set; }
+
+    public void AddEvent(SessionEvent evt)                          { lock (_syncLock) _events.Add(evt); }
+    public void AddMessage(AgentMessage msg)                        { lock (_syncLock) _messages.Add(msg); }
+    public void AddMessages(IEnumerable<AgentMessage> msgs)         { lock (_syncLock) _messages.AddRange(msgs); }
+    public List<SessionEvent> SnapshotEvents()                      { lock (_syncLock) return [.._events]; }
 
     public string DurationLabel
     {

@@ -62,12 +62,12 @@ public sealed class SessionHostService : IDisposable
                     EndedAt    = cp.IsComplete ? cp.LastUpdatedAt : null,
                     Succeeded  = cp.IsComplete ? true : null,
                 };
-                session.Messages.AddRange(cp.Messages);
+                session.AddMessages(cp.Messages);
                 // Synthesize message events so SessionDetail can render history
                 foreach (var msg in cp.Messages)
-                    session.Events.Add(new SessionEvent { Type = "message", Message = msg });
+                    session.AddEvent(new SessionEvent { Type = "message", Message = msg });
                 if (cp.IsComplete)
-                    session.Events.Add(new SessionEvent { Type = "session_end", Succeeded = true });
+                    session.AddEvent(new SessionEvent { Type = "session_end", Succeeded = true });
 
                 _sessions.TryAdd(cp.SessionId, session);
             }
@@ -118,7 +118,7 @@ public sealed class SessionHostService : IDisposable
 
     private void Emit(ManagedSession session, SessionEvent evt)
     {
-        session.Events.Add(evt);
+        session.AddEvent(evt);
         EventFired?.Invoke(session.SessionId, evt);
     }
 
@@ -168,7 +168,7 @@ public sealed class SessionHostService : IDisposable
                 var elapsed = turnClock.Elapsed;
                 turnClock.Restart();
 
-                session.Messages.Add(msg);
+                session.AddMessage(msg);
                 checkpoint.Messages.Add(msg);
                 checkpoint.LastUpdatedAt = DateTime.UtcNow;
 
