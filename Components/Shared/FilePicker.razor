@@ -1,0 +1,112 @@
+@using System.IO
+
+<div class="dir-picker file-picker">
+    <div class="dir-picker-nav">
+        <button class="btn btn-sm" @onclick="GoUp"
+                disabled="@(_current == Path.GetPathRoot(_current))">↑ Up</button>
+        <span class="dir-picker-current" title="@_current">@_current</span>
+    </div>
+
+    @if (_error is not null)
+    {
+        <p class="dir-picker-error">@_error</p>
+    }
+
+    <div class="dir-picker-list">
+        @foreach (var dir in _dirs)
+        {
+            <button class="dir-picker-item" @onclick="() => Navigate(dir)">
+                <span class="dir-picker-icon fp-dir-icon">▶</span>
+                <span class="fp-item-name">@Path.GetFileName(dir)</span>
+                <button class="fp-select-inline btn btn-sm"
+                        @onclick:stopPropagation
+                        @onclick="() => Confirm(dir)">Select</button>
+            </button>
+        }
+        @foreach (var file in _files)
+        {
+            var name = Path.GetFileName(file);
+            <button class="dir-picker-item fp-file-row @(_selected == file ? "fp-file-selected" : "")"
+                    @onclick="() => SelectFile(file)">
+                <span class="dir-picker-icon fp-file-icon">—</span>
+                <span class="fp-item-name">@name</span>
+            </button>
+        }
+        @if (_dirs.Length == 0 && _files.Length == 0 && _error is null)
+        {
+            <p class="dir-picker-empty">Empty directory</p>
+        }
+    </div>
+
+    <div class="dir-picker-footer">
+        <button class="btn btn-sm" @onclick="() => OnClose.InvokeAsync()">Cancel</button>
+        <button class="btn btn-sm" @onclick="() => Confirm(_current)">Select folder</button>
+        <button class="btn btn-sm btn-primary" @onclick="ConfirmSelection"
+                disabled="@(_selected is null)">
+            @(_selected is null ? "Pick a file…" : $"✓ {Path.GetFileName(_selected)}")
+        </button>
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback<string> OnSelect    { get; set; }
+    [Parameter] public EventCallback         OnClose     { get; set; }
+    [Parameter] public string                InitialPath { get; set; } = string.Empty;
+    [Parameter] public string                Filter      { get; set; } = "*";
+
+    private string   _current  = string.Empty;
+    private string[] _dirs     = [];
+    private string[] _files    = [];
+    private string?  _selected;
+    private string?  _error;
+
+    protected override void OnInitialized()
+    {
+        var initial = !string.IsNullOrEmpty(InitialPath) && Directory.Exists(InitialPath)
+            ? Path.GetFullPath(InitialPath)
+            : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        _current = initial;
+        Load();
+    }
+
+    private void Navigate(string path) { _current = path; _selected = null; Load(); }
+
+    private void GoUp()
+    {
+        var parent = Directory.GetParent(_current)?.FullName;
+        if (parent is not null) { _current = parent; _selected = null; Load(); }
+    }
+
+    private void SelectFile(string path) { _selected = path; }
+
+    private void Load()
+    {
+        _error = null;
+        try
+        {
+            _dirs = Directory.GetDirectories(_current)
+                .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            _files = (Filter == "*"
+                    ? Directory.GetFiles(_current)
+                    : Directory.GetFiles(_current, Filter))
+                .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+        catch (Exception ex)
+        {
+            _dirs  = [];
+            _files = [];
+            _error = ex.Message;
+        }
+    }
+
+    private void Confirm(string path) => OnSelect.InvokeAsync(path);
+
+    private void ConfirmSelection()
+    {
+        if (_selected is not null)
+            OnSelect.InvokeAsync(_selected);
+    }
+}

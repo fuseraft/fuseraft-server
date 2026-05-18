@@ -1282,3 +1282,25 @@ code, pre, .mono { font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Menlo, 
 
 .issue-error   .issue-icon { color: var(--err); }
 .issue-warning .issue-icon { color: var(--warn); }
+
+/* ===== File picker ===== */
+.file-picker .dir-picker-list { max-height: 260px; }
+
+.fp-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+
+.fp-dir-icon  { color: var(--accent); }
+.fp-file-icon { color: var(--border); font-size: 8px; }
+
+.fp-file-row  { color: var(--muted); }
+.fp-file-row:hover { color: var(--text); background: var(--surface2); }
+
+.fp-file-selected { background: var(--accent-dim) !important; color: var(--accent) !important; }
+
+.fp-select-inline {
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity .1s;
+  flex-shrink: 0;
+}
+
+.dir-picker-item:hover .fp-select-inline { opacity: 1; }

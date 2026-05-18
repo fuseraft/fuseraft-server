@@ -92,8 +92,17 @@
             </div>
             <div class="form-group">
                 <label class="form-label">Source Path</label>
-                <input @bind="_addSource" class="input" placeholder="/path/to/file-or-directory" />
-                <p class="form-hint">Absolute path to the file or directory to import.</p>
+                <div class="input-with-btn">
+                    <input @bind="_addSource" class="input" placeholder="/path/to/file-or-directory" />
+                    <button class="btn btn-sm" @onclick="ToggleFilePicker">Browse…</button>
+                </div>
+                @if (_showFilePicker)
+                {
+                    <FilePicker InitialPath="@_workspace"
+                                OnSelect="OnFileSelected"
+                                OnClose="CloseFilePicker" />
+                }
+                <p class="form-hint">Absolute path to a file or directory to import.</p>
             </div>
             <div class="form-group">
                 <label class="form-label">Name <span class="form-optional">(optional)</span></label>
@@ -126,11 +135,12 @@
 
     private fuseraft.Infrastructure.ContextIndex? _index;
 
-    private bool    _showAdd   = false;
-    private bool    _adding    = false;
-    private string  _addSource = string.Empty;
-    private string  _addName   = string.Empty;
-    private string  _addDesc   = string.Empty;
+    private bool    _showAdd      = false;
+    private bool    _adding       = false;
+    private bool    _showFilePicker = false;
+    private string  _addSource   = string.Empty;
+    private string  _addName     = string.Empty;
+    private string  _addDesc     = string.Empty;
     private string? _addError;
 
     private void TogglePicker()   { _showPicker = !_showPicker; }
@@ -163,12 +173,24 @@
 
     private void OpenAdd()
     {
-        _showAdd  = true;
-        _addError = null;
-        _addSource = _addName = _addDesc = string.Empty;
+        _showAdd        = true;
+        _showFilePicker = false;
+        _addError       = null;
+        _addSource      = _addName = _addDesc = string.Empty;
     }
 
-    private void CloseAdd() { _showAdd = false; _addError = null; }
+    private void CloseAdd()         { _showAdd = false; _showFilePicker = false; _addError = null; }
+    private void ToggleFilePicker() { _showFilePicker = !_showFilePicker; }
+    private void CloseFilePicker()  { _showFilePicker = false; }
+
+    private void OnFileSelected(string path)
+    {
+        _addSource      = path;
+        _showFilePicker = false;
+        if (string.IsNullOrWhiteSpace(_addName))
+            _addName = DeriveNameFromPath(path);
+        StateHasChanged();
+    }
 
     private async Task AddAsync()
     {
