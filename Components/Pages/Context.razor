@@ -1,5 +1,7 @@
 @page "/context"
+@implements IDisposable
 @inject ContextService ContextService
+@inject WorkspaceService WorkspaceService
 
 <PageTitle>Context — Fuseraft</PageTitle>
 
@@ -130,6 +132,25 @@
 @code {
     private string  _workspace  = string.Empty;
     private bool    _showPicker = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        WorkspaceService.Changed += OnWorkspaceChanged;
+        if (!string.IsNullOrWhiteSpace(WorkspaceService.Current))
+        {
+            _workspace = WorkspaceService.Current;
+            await LoadAsync();
+        }
+    }
+
+    private void OnWorkspaceChanged() =>
+        InvokeAsync(async () =>
+        {
+            _workspace = WorkspaceService.Current;
+            await LoadAsync();
+        });
+
+    public void Dispose() => WorkspaceService.Changed -= OnWorkspaceChanged;
     private bool    _loading    = false;
     private string? _loadError;
 
@@ -150,12 +171,14 @@
     {
         _workspace  = path;
         _showPicker = false;
+        WorkspaceService.Set(path);
         _ = LoadAsync();
     }
 
     private async Task LoadAsync()
     {
         if (string.IsNullOrWhiteSpace(_workspace)) { _index = null; return; }
+        WorkspaceService.Set(_workspace);
         _loading   = true;
         _loadError = null;
         StateHasChanged();

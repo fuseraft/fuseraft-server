@@ -34,7 +34,7 @@
             </div>
             <div class="form-group">
                 <label class="form-label">Config Path <span class="form-optional">(optional)</span></label>
-                <input @bind="_addConfig" class="input" placeholder="config/orchestration.yaml" />
+                <input @bind="_addConfig" class="input" placeholder=".fuseraft/config/orchestration.yaml" />
             </div>
             <div class="form-group">
                 <label class="form-label">Description <span class="form-optional">(optional)</span></label>
@@ -139,7 +139,7 @@
         {
             var sessionId = await SessionService.StartSessionAsync(
                 job.Task,
-                job.Config ?? "config/orchestration.yaml",
+                job.Config ?? ".fuseraft/config/orchestration.yaml",
                 job.WorkDir ?? string.Empty);
 
             await ScheduleService.UpdateJobRunAsync(name);

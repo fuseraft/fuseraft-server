@@ -23,9 +23,13 @@ public sealed class ConfigService
         if (!Directory.Exists(directory)) return [];
 
         return Directory.GetFiles(directory, "*.*", SearchOption.AllDirectories)
-            .Where(f => f.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase)
-                     || f.EndsWith(".yml",  StringComparison.OrdinalIgnoreCase)
-                     || f.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            .Where(f => (f.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase)
+                      || f.EndsWith(".yml",  StringComparison.OrdinalIgnoreCase)
+                      || f.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                     && !string.Equals(
+                            Path.GetFileName(Path.GetDirectoryName(f)),
+                            "agents",
+                            StringComparison.OrdinalIgnoreCase))
             .Order()
             .Select(f =>
             {

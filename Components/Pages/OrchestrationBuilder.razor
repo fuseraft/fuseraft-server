@@ -1,6 +1,9 @@
 @page "/orchestration/builder"
+@using System.Diagnostics
+@implements IDisposable
 @inject OrchestrationTemplateService TemplateService
 @inject NavigationManager Nav
+@inject WorkspaceService WorkspaceService
 
 <PageTitle>Orchestration Builder — Fuseraft</PageTitle>
 
@@ -214,7 +217,7 @@
             <div>
                 <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
                     <span class="orch-section-label" style="margin-bottom:0">YAML</span>
-                    <button class="btn btn-sm" @onclick="SyncYamlFromDraft" title="Regenerate YAML from current visual state">↻ Sync from draft</button>
+                    <button class="btn btn-sm" @onclick="SyncYamlFromDraft" title="Re-run fuseraft init for the selected template and model">↻ Sync from draft</button>
                 </div>
                 <textarea class="orch-yaml-editor" @bind="_yamlOverride"
                           placeholder="Generated YAML will appear here…"></textarea>
@@ -235,7 +238,7 @@
 
             <div class="form-group">
                 <label class="form-label">Config File</label>
-                <input class="input" @bind="_configRelPath" placeholder="config/orchestration.yaml" />
+                <input class="input" @bind="_configRelPath" placeholder=".fuseraft/config/orchestration.yaml" />
                 @if (!string.IsNullOrWhiteSpace(_workspace) && !string.IsNullOrWhiteSpace(_configRelPath)
                      && !Path.IsPathRooted(_configRelPath))
                 {
@@ -278,7 +281,7 @@
     private string  _model         = "claude-opus-4-5";
     private string  _orchName      = string.Empty;
     private string  _workspace     = string.Empty;
-    private string  _configRelPath = "config/orchestration.yaml";
+    private string  _configRelPath = ".fuseraft/config/orchestration.yaml";
     private bool    _showDirPicker = false;
     private bool    _saving        = false;
     private string? _saveError;
@@ -301,9 +304,28 @@
         public List<string> Plugins       { get; set; } = [];
     }
 
+    protected override void OnInitialized()
+    {
+        if (string.IsNullOrWhiteSpace(_workspace))
+            _workspace = WorkspaceService.Current;
+        WorkspaceService.Changed += OnWorkspaceChanged;
+    }
+
+    private void OnWorkspaceChanged() =>
+        InvokeAsync(() =>
+        {
+            if (string.IsNullOrWhiteSpace(_workspace))
+            {
+                _workspace = WorkspaceService.Current;
+                StateHasChanged();
+            }
+        });
+
+    public void Dispose() => WorkspaceService.Changed -= OnWorkspaceChanged;
+
     private void SelectTemplate(string key) { _selectedKey = key; StateHasChanged(); }
 
-    private void GoToStep2()
+    private async Task GoToStep2()
     {
         if (_selectedKey is null) return;
         _template = TemplateService.GetTemplate(_selectedKey);
@@ -317,14 +339,19 @@
         }).ToList();
         _selectedAgent = null;
 
-        // Seed YAML from template once; user edits it independently from here
+        _step = 2;
+        StateHasChanged();
+
+        var tmp = Path.Combine(Path.GetTempPath(), $"fuseraft-init-{Guid.NewGuid():N}.yaml");
         try
         {
-            _yamlOverride = TemplateService.Build(_template.Key, _model, null).MainConfig;
+            var (ok, yaml, _) = await RunInitAsync(tmp);
+            _yamlOverride = ok ? yaml : string.Empty;
         }
-        catch { _yamlOverride = string.Empty; }
-
-        _step = 2;
+        finally
+        {
+            if (File.Exists(tmp)) File.Delete(tmp);
+        }
         StateHasChanged();
     }
 
@@ -368,62 +395,67 @@
         StateHasChanged();
     }
 
-    // Regenerate YAML from current draft state
-    private void SyncYamlFromDraft()
+    private async Task SyncYamlFromDraft()
     {
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine("Orchestration:");
-        sb.AppendLine($"  Name: {_orchName}");
-        sb.AppendLine();
-        sb.AppendLine("  Agents:");
-
-        foreach (var a in _agents)
+        var tmp = Path.Combine(Path.GetTempPath(), $"fuseraft-init-{Guid.NewGuid():N}.yaml");
+        try
         {
-            sb.AppendLine($"    - Name: {a.Name}");
-            if (!string.IsNullOrWhiteSpace(a.Description))
-                sb.AppendLine($"      Description: {a.Description}");
-            if (!string.IsNullOrWhiteSpace(a.Instructions))
-            {
-                sb.AppendLine("      Instructions: |");
-                foreach (var line in a.Instructions.Replace("\r\n", "\n").Split('\n'))
-                    sb.AppendLine($"        {line}");
-            }
-            var modelId = string.IsNullOrWhiteSpace(a.ModelOverride) ? _model : a.ModelOverride;
-            sb.AppendLine("      Model:");
-            sb.AppendLine($"        ModelId: {modelId}");
-            if (!string.IsNullOrWhiteSpace(a.Endpoint))
-                sb.AppendLine($"        Endpoint: {a.Endpoint}");
-            if (a.Plugins.Count > 0)
-            {
-                sb.AppendLine("      Plugins:");
-                foreach (var p in a.Plugins) sb.AppendLine($"        - {p}");
-            }
-            if (!string.IsNullOrWhiteSpace(a.FunctionChoice))
-                sb.AppendLine($"      FunctionChoice: {a.FunctionChoice}");
-            if (a.TrustScore.HasValue)
-                sb.AppendLine($"      TrustScore: {a.TrustScore.Value:F2}");
-            if (a.MaxTokens.HasValue)
-                sb.AppendLine($"      MaxTokens: {a.MaxTokens.Value}");
-            if (a.MaxToolCallsPerTurn.HasValue)
-                sb.AppendLine($"      MaxToolCallsPerTurn: {a.MaxToolCallsPerTurn.Value}");
+            var (ok, yaml, err) = await RunInitAsync(tmp);
+            if (ok) _yamlOverride = yaml;
+            else    _saveError    = string.IsNullOrWhiteSpace(err) ? "fuseraft init failed." : err;
         }
-
-        sb.AppendLine();
-        sb.AppendLine("  Selection:");
-        sb.AppendLine($"    Type: {_template?.SelectionType ?? "sequential"}");
-        sb.AppendLine();
-        sb.AppendLine("  Termination:");
-        sb.AppendLine("    Type: regex");
-        sb.AppendLine("    Pattern: TASK_COMPLETE");
-        sb.AppendLine("    MaxIterations: 20");
-
-        _yamlOverride = sb.ToString();
+        finally
+        {
+            if (File.Exists(tmp)) File.Delete(tmp);
+        }
         StateHasChanged();
+    }
+
+    private async Task<(bool Ok, string Yaml, string Error)> RunInitAsync(string outputPath)
+    {
+        try
+        {
+            var workDir = string.IsNullOrWhiteSpace(_workspace)
+                ? Directory.GetCurrentDirectory()
+                : _workspace.Trim();
+
+            var psi = new ProcessStartInfo
+            {
+                FileName               = "fuseraft",
+                UseShellExecute        = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError  = true,
+                WorkingDirectory       = workDir,
+            };
+            psi.ArgumentList.Add("init");
+            psi.ArgumentList.Add(outputPath);
+            psi.ArgumentList.Add("-t");
+            psi.ArgumentList.Add(_selectedKey ?? "minimal");
+            psi.ArgumentList.Add("-m");
+            psi.ArgumentList.Add(_model);
+            psi.ArgumentList.Add("--no-interactive");
+
+            using var proc = Process.Start(psi)!;
+            await proc.WaitForExitAsync();
+
+            if (proc.ExitCode != 0)
+            {
+                var err = await proc.StandardError.ReadToEndAsync();
+                return (false, string.Empty, err.Trim());
+            }
+
+            var yaml = await File.ReadAllTextAsync(outputPath);
+            return (true, yaml, string.Empty);
+        }
+        catch (Exception ex)
+        {
+            return (false, string.Empty, ex.Message);
+        }
     }
 
     private void TogglePicker()  { _showDirPicker = !_showDirPicker; StateHasChanged(); }
     private void ClosePicker()   { _showDirPicker = false; StateHasChanged(); }
-    private void OnDirSelected(string path) { _workspace = path; _showDirPicker = false; StateHasChanged(); }
+    private void OnDirSelected(string path) { _workspace = path; _showDirPicker = false; WorkspaceService.Set(path); StateHasChanged(); }
 
     private static int?    TryParseInt(string? s)    => int.TryParse(s, out var v)    ? v : null;
     private static double? TryParseDouble(string? s) => double.TryParse(s, out var v) ? v : null;
@@ -444,7 +476,6 @@
 
         if (string.IsNullOrWhiteSpace(_workspace))     { _saveError = "Workspace is required."; return false; }
         if (string.IsNullOrWhiteSpace(_configRelPath)) { _saveError = "Config file path is required."; return false; }
-        if (string.IsNullOrWhiteSpace(_yamlOverride))  { _saveError = "YAML content is empty."; return false; }
 
         _saving = true;
         StateHasChanged();
@@ -454,8 +485,10 @@
             var ws      = _workspace.Trim();
             var relPath = _configRelPath.Trim();
             var absPath = Path.IsPathRooted(relPath) ? relPath : Path.GetFullPath(Path.Combine(ws, relPath));
-            var dir     = Path.GetDirectoryName(absPath)!;
-            await Task.Run(() => { Directory.CreateDirectory(dir); File.WriteAllText(absPath, _yamlOverride); });
+
+            var (ok, yaml, err) = await RunInitAsync(absPath);
+            if (!ok) { _saveError = string.IsNullOrWhiteSpace(err) ? "fuseraft init failed." : err; return false; }
+            _yamlOverride = yaml;
             return true;
         }
         catch (Exception ex) { _saveError = ex.Message; return false; }

@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject SessionHostService SessionService
 @inject NavigationManager Nav
+@inject WorkspaceService WorkspaceService
 @using Microsoft.AspNetCore.WebUtilities
 
 <PageTitle>Sessions — Fuseraft</PageTitle>
@@ -41,7 +42,7 @@
             </div>
             <div class="form-group">
                 <label class="form-label">Config File</label>
-                <input @bind="_newConfig" class="input" placeholder="config/orchestration.yaml" />
+                <input @bind="_newConfig" class="input" placeholder=".fuseraft/config/orchestration.yaml" />
                 <p class="form-hint">
                     Relative to the workspace, or an absolute path.
                     @if (!string.IsNullOrWhiteSpace(_newWorkspace) && !string.IsNullOrWhiteSpace(_newConfig)
@@ -83,7 +84,7 @@
     private bool   _starting      = false;
     private string _newTask       = string.Empty;
     private string _newWorkspace  = string.Empty;
-    private string _newConfig     = "config/orchestration.yaml";
+    private string _newConfig     = ".fuseraft/config/orchestration.yaml";
     private string? _startError;
     private string _filter = "All";
 
@@ -99,15 +100,28 @@
     protected override void OnInitialized()
     {
         SessionService.SessionListChanged += OnListChanged;
+        WorkspaceService.Changed += OnWorkspaceChanged;
         var uri  = new Uri(Nav.Uri);
         var qs   = QueryHelpers.ParseQuery(uri.Query);
         if (qs.TryGetValue("workspace", out var ws)  && !string.IsNullOrWhiteSpace(ws))
             _newWorkspace = ws!;
+        else if (!string.IsNullOrWhiteSpace(WorkspaceService.Current))
+            _newWorkspace = WorkspaceService.Current;
         if (qs.TryGetValue("config",    out var cfg) && !string.IsNullOrWhiteSpace(cfg))
             _newConfig = cfg!;
         if (qs.TryGetValue("new",       out var nw)  && nw == "true")
             _showNew = true;
     }
+
+    private void OnWorkspaceChanged() =>
+        InvokeAsync(() =>
+        {
+            if (string.IsNullOrWhiteSpace(_newWorkspace))
+            {
+                _newWorkspace = WorkspaceService.Current;
+                StateHasChanged();
+            }
+        });
 
     private void OnListChanged() => InvokeAsync(StateHasChanged);
 
@@ -116,7 +130,7 @@
     private void CloseDialog()       { _showNew = false; _showDirPicker = false; _startError = null; StateHasChanged(); }
     private void TogglePicker()      { _showDirPicker = !_showDirPicker; StateHasChanged(); }
     private void ClosePicker()       { _showDirPicker = false; StateHasChanged(); }
-    private void OnDirSelected(string path) { _newWorkspace = path; _showDirPicker = false; StateHasChanged(); }
+    private void OnDirSelected(string path) { _newWorkspace = path; _showDirPicker = false; WorkspaceService.Set(path); StateHasChanged(); }
 
     private async Task StartAsync()
     {
@@ -162,5 +176,9 @@
         catch { /* session may have been deleted; list will refresh */ }
     }
 
-    public void Dispose() => SessionService.SessionListChanged -= OnListChanged;
+    public void Dispose()
+    {
+        SessionService.SessionListChanged -= OnListChanged;
+        WorkspaceService.Changed -= OnWorkspaceChanged;
+    }
 }

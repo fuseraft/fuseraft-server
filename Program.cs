@@ -15,6 +15,7 @@ builder.Services.AddSingleton<OrchestrationTemplateService>();
 builder.Services.AddSingleton<PluginCatalogService>();
 builder.Services.AddSingleton<ContextService>();
 builder.Services.AddSingleton<ConfigService>();
+builder.Services.AddSingleton<WorkspaceService>();
 
 var app = builder.Build();
 
