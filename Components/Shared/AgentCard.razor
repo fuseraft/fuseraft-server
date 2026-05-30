@@ -18,7 +18,29 @@
             }
         </div>
     </div>
-    <div class="card-body">@((MarkupString)Rendered)</div>
+    @if (!string.IsNullOrWhiteSpace(Message.Content))
+    {
+        <div class="card-body">@((MarkupString)Rendered)</div>
+    }
+    @if (Message.ToolCalls is { Count: > 0 })
+    {
+        <div class="card-tool-calls">
+            @foreach (var tc in Message.ToolCalls)
+            {
+                <span class="tool-call-chip @(tc.Succeeded ? "" : "tool-call-fail")">
+                    <span class="tool-call-name">@tc.Name</span>
+                    @if (!string.IsNullOrEmpty(tc.ArgsSummary))
+                    {
+                        <span class="tool-call-args">@tc.ArgsSummary</span>
+                    }
+                </span>
+            }
+        </div>
+    }
+    @if (string.IsNullOrWhiteSpace(Message.Content) && (Message.ToolCalls is null || Message.ToolCalls.Count == 0))
+    {
+        <div class="card-body muted">(no content)</div>
+    }
 </div>
 
 @code {

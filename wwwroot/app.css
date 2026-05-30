@@ -1305,6 +1305,44 @@ code, pre, .mono { font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Menlo, 
 
 .dir-picker-item:hover .fp-select-inline { opacity: 1; }
 
+/* ===== Agent card — tool calls ===== */
+.card-tool-calls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 8px 14px 10px;
+  border-top: 1px solid var(--border2);
+}
+
+.tool-call-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace;
+  color: var(--muted);
+}
+
+.tool-call-chip.tool-call-fail {
+  border-color: rgba(248,81,73,.35);
+  background: rgba(248,81,73,.06);
+  color: var(--err);
+}
+
+.tool-call-name { color: var(--accent); }
+
+.tool-call-args {
+  color: var(--muted);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ===== Orchestration Builder — saved config cards ===== */
 .saved-config-path {
   font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace;
