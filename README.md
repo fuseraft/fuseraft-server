@@ -45,6 +45,27 @@ Agents can pause and request human input mid-run. The HITL panel shows pending p
 
 ---
 
+## Ecosystem Tools
+
+### vsl (Vessel)
+Mini autonomous software engineering agent (Phase 1). CLI tool for repository analysis and implementation planning.
+
+**Purpose**: AI agent that analyzes repos, generates plans using LangGraph orchestration. Complementary to fuseraft for automated SE workflows.
+
+**Tech Stack**:
+- Python 3.14, LangGraph, langchain-openai (xAI grok-4.3), Typer, pytest, uv
+- State in `.vsl/` JSON
+
+**CLI Commands** (Phase 1):
+```bash
+vsl analyze --repo ./sample-repo
+vsl plan --repo ./sample-repo --task "Add Redis caching to the customer lookup API"
+```
+
+See `../vsl/` (task.md, pyproject.toml, vsl/ package) for source and full spec. Uses XAI_API_KEY env var. No direct runtime integration with fuseraft-cli yet.
+
+---
+
 ## Requirements
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
