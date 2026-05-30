@@ -12,12 +12,12 @@ A Blazor Server web UI for [fuseraft](https://github.com/fuseraft/fuseraft-cli) 
 Start and monitor multi-agent orchestration sessions. Each session streams live agent events as they happen. Running sessions can be cancelled; completed sessions retain their full event history.
 
 ### Orchestration Builder
-Build orchestration configs without touching YAML directly.
+Build and launch orchestration configs without touching YAML directly.
 
+- **Recent configs** — previously used orchestrations appear at the top of the template picker; select one and start a session immediately without re-generating anything
 - Pick from 10 built-in templates (Dev Team, Research, DevOps, Minimal, and more)
-- Edit agents visually: name, description, instructions, model override, endpoint, plugins, FunctionChoice, TrustScore, MaxTokens
-- Select a stored **Model Profile** to populate model ID and endpoint in one click
-- Preview and hand-edit the generated YAML side-by-side
+- Edit agents visually: name, description, instructions, model override, endpoint, reasoning effort, plugins, FunctionChoice, TrustScore, MaxTokens
+- Select a stored **Model Profile** per agent to populate model ID, endpoint, and reasoning effort in one click
 - Save to a workspace directory and launch directly into a new session
 
 ### Model Profiles
