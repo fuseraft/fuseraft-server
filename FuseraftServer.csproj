@@ -10,7 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../fuseraft-cli/src/FuseraftCli.csproj" />
+    <ProjectReference Include="../fuseraft-cli/src/fuseraft.csproj" />
   </ItemGroup>
 
 </Project>

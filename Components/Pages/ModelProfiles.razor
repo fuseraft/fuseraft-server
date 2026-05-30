@@ -1,0 +1,253 @@
+@page "/model-profiles"
+@implements IDisposable
+@inject ModelProfileService ProfileService
+
+<PageTitle>Model Profiles — Fuseraft</PageTitle>
+
+<div class="page-header">
+    <h1>Model Profiles</h1>
+    <p class="muted">Store model IDs, API endpoints, and API keys once. Reference them in any orchestration.</p>
+</div>
+
+@if (_profiles.Count == 0 && !_showForm)
+{
+    <div class="empty-state">
+        <p>No profiles yet.</p>
+        <button class="btn btn-primary" @onclick="StartAdd">Add Profile</button>
+    </div>
+}
+else
+{
+    @if (_profiles.Count > 0)
+    {
+        <div class="profile-list">
+            @foreach (var p in _profiles)
+            {
+                <div class="profile-card @(_editId == p.Id ? "profile-card-editing" : "")">
+                    <div class="profile-card-main">
+                        <div class="profile-name">@p.Name</div>
+                        <div class="profile-meta">
+                            <span class="profile-provider-pill">@(string.IsNullOrEmpty(p.Provider) ? "provider" : p.Provider)</span>
+                            <span class="profile-model">@p.ModelId</span>
+                            @if (!string.IsNullOrEmpty(p.Endpoint))
+                            {
+                                <span class="profile-endpoint muted">@p.Endpoint</span>
+                            }
+                        </div>
+                        <div class="profile-envvar muted">env: @p.ApiKeyEnvVar</div>
+                    </div>
+                    <div class="profile-card-actions">
+                        <button class="btn btn-sm" @onclick="() => StartEdit(p)">Edit</button>
+                        <button class="btn btn-sm btn-danger" @onclick="() => StartDelete(p.Id)">Delete</button>
+                    </div>
+                </div>
+
+                @if (_deleteId == p.Id)
+                {
+                    <div class="delete-confirm">
+                        <span>Delete <strong>@p.Name</strong>? The API key will be removed from the keychain.</span>
+                        <button class="btn btn-sm btn-danger" @onclick="ConfirmDelete">Confirm</button>
+                        <button class="btn btn-sm" @onclick="CancelDelete">Cancel</button>
+                    </div>
+                }
+            }
+        </div>
+    }
+
+    @if (!_showForm)
+    {
+        <button class="btn btn-primary" style="margin-top:16px" @onclick="StartAdd">+ Add Profile</button>
+    }
+}
+
+@if (_showForm)
+{
+    <div class="profile-form">
+        <h2 class="profile-form-title">@(_editId is null ? "New Profile" : "Edit Profile")</h2>
+
+        <div class="form-group">
+            <label class="form-label">Display Name <span class="form-required">*</span></label>
+            <input class="input" @bind="_formName" placeholder="e.g. Claude Sonnet (Prod)" />
+        </div>
+
+        <div class="form-row-2">
+            <div class="form-group">
+                <label class="form-label">Provider</label>
+                <select class="input" @bind="_formProvider">
+                    <option value="">— select —</option>
+                    <option value="anthropic">anthropic</option>
+                    <option value="openai">openai</option>
+                    <option value="xai">xai</option>
+                    <option value="google">google</option>
+                    <option value="mistral">mistral</option>
+                    <option value="ollama">ollama</option>
+                    <option value="other">other</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Model ID <span class="form-required">*</span></label>
+                <input class="input" @bind="_formModelId" placeholder="e.g. claude-sonnet-4-6" />
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">API Endpoint</label>
+            <input class="input" @bind="_formEndpoint" placeholder="https://api.anthropic.com" />
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">
+                API Key
+                @if (_editId is not null) { <span class="form-label-muted">(leave blank to keep current)</span> }
+                else { <span class="form-required">*</span> }
+            </label>
+            <div class="input-with-btn">
+                <input class="input" type="@(_showKey ? "text" : "password")"
+                       @bind="_formApiKey" placeholder="sk-ant-…" />
+                <button class="btn btn-sm" type="button" @onclick="ToggleKeyVisibility">
+                    @(_showKey ? "Hide" : "Show")
+                </button>
+            </div>
+            @if (_editId is not null && _editHasKey)
+            {
+                <p class="form-hint">A key is stored for this profile. Enter a new one to replace it.</p>
+            }
+        </div>
+
+        @if (_formError is not null)
+        {
+            <div class="error-banner">@_formError</div>
+        }
+
+        <div class="profile-form-actions">
+            <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">
+                @(_saving ? "Saving…" : "Save")
+            </button>
+            <button class="btn" @onclick="CancelForm">Cancel</button>
+        </div>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<ModelProfile> _profiles = [];
+    private bool    _showForm    = false;
+    private bool    _saving      = false;
+    private bool    _showKey     = false;
+    private bool    _editHasKey  = false;
+    private string? _editId;
+    private string? _deleteId;
+    private string? _formError;
+
+    private string _formName     = string.Empty;
+    private string _formProvider = string.Empty;
+    private string _formModelId  = string.Empty;
+    private string _formEndpoint = string.Empty;
+    private string _formApiKey   = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _profiles = await ProfileService.ListAsync();
+        ProfileService.ProfilesChanged += OnProfilesChanged;
+    }
+
+    private void OnProfilesChanged() =>
+        InvokeAsync(async () =>
+        {
+            _profiles = await ProfileService.ListAsync();
+            StateHasChanged();
+        });
+
+    public void Dispose() => ProfileService.ProfilesChanged -= OnProfilesChanged;
+
+    private void StartAdd()
+    {
+        _editId      = null;
+        _editHasKey  = false;
+        _formName     = string.Empty;
+        _formProvider = string.Empty;
+        _formModelId  = string.Empty;
+        _formEndpoint = string.Empty;
+        _formApiKey   = string.Empty;
+        _formError    = null;
+        _showKey      = false;
+        _showForm     = true;
+        StateHasChanged();
+    }
+
+    private async Task StartEdit(ModelProfile p)
+    {
+        _editId       = p.Id;
+        _editHasKey   = await ProfileService.HasKeyAsync(p.Id);
+        _formName     = p.Name;
+        _formProvider = p.Provider;
+        _formModelId  = p.ModelId;
+        _formEndpoint = p.Endpoint;
+        _formApiKey   = string.Empty;
+        _formError    = null;
+        _showKey      = false;
+        _showForm     = true;
+        StateHasChanged();
+    }
+
+    private void CancelForm()
+    {
+        _showForm = false;
+        _editId   = null;
+        StateHasChanged();
+    }
+
+    private async Task SaveAsync()
+    {
+        _formError = null;
+
+        if (string.IsNullOrWhiteSpace(_formName))     { _formError = "Display name is required."; return; }
+        if (string.IsNullOrWhiteSpace(_formModelId))  { _formError = "Model ID is required."; return; }
+        if (_editId is null && string.IsNullOrWhiteSpace(_formApiKey))
+        {
+            _formError = "API key is required for new profiles.";
+            return;
+        }
+
+        _saving = true;
+        StateHasChanged();
+
+        try
+        {
+            var profile = new ModelProfile
+            {
+                Id       = _editId ?? Guid.NewGuid().ToString("N")[..12],
+                Name     = _formName.Trim(),
+                Provider = _formProvider,
+                ModelId  = _formModelId.Trim(),
+                Endpoint = _formEndpoint.Trim(),
+            };
+
+            var apiKey = string.IsNullOrWhiteSpace(_formApiKey) ? null : _formApiKey.Trim();
+            await ProfileService.SaveAsync(profile, apiKey);
+            _showForm = false;
+            _editId   = null;
+        }
+        catch (Exception ex)
+        {
+            _formError = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+            StateHasChanged();
+        }
+    }
+
+    private void StartDelete(string id) { _deleteId = id; StateHasChanged(); }
+    private void CancelDelete()         { _deleteId = null; StateHasChanged(); }
+
+    private async Task ConfirmDelete()
+    {
+        if (_deleteId is null) return;
+        await ProfileService.DeleteAsync(_deleteId);
+        _deleteId = null;
+        StateHasChanged();
+    }
+
+    private void ToggleKeyVisibility() { _showKey = !_showKey; StateHasChanged(); }
+}

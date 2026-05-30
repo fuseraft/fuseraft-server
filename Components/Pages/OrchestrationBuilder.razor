@@ -4,6 +4,7 @@
 @inject OrchestrationTemplateService TemplateService
 @inject NavigationManager Nav
 @inject WorkspaceService WorkspaceService
+@inject ModelProfileService ProfileService
 
 <PageTitle>Orchestration Builder — Fuseraft</PageTitle>
 
@@ -133,6 +134,19 @@
                     </div>
 
                     <!-- Model override -->
+                    @if (_profiles.Count > 0)
+                    {
+                        <div class="form-group">
+                            <label class="form-label">Use Profile</label>
+                            <select class="input" @onchange="e => ApplyProfileToAgent(idx, e.Value?.ToString())">
+                                <option value="">— none —</option>
+                                @foreach (var p in _profiles)
+                                {
+                                    <option value="@p.Id">@p.Name (@p.ModelId)</option>
+                                }
+                            </select>
+                        </div>
+                    }
                     <div class="agent-editor-row">
                         <div class="form-group" style="flex:1;">
                             <label class="form-label">Model Override</label>
@@ -208,6 +222,27 @@
 
         <!-- Right: side panel -->
         <div class="orch-side-panel">
+            @if (_profiles.Count > 0)
+            {
+                <div class="form-group">
+                    <label class="form-label">Use Profile</label>
+                    <select class="input" @onchange="OnGlobalProfileChanged">
+                        <option value="">— none —</option>
+                        @foreach (var p in _profiles)
+                        {
+                            <option value="@p.Id">@p.Name (@p.ModelId)</option>
+                        }
+                    </select>
+                    @if (_globalProfileId is not null)
+                    {
+                        var prof = _profiles.FirstOrDefault(p => p.Id == _globalProfileId);
+                        if (prof is not null)
+                        {
+                            <p class="form-hint profile-envvar-hint">API key env: <code>@prof.ApiKeyEnvVar</code></p>
+                        }
+                    }
+                </div>
+            }
             <div class="form-group">
                 <label class="form-label">Default Model</label>
                 <input class="input" value="@_model" @oninput="OnModelChanged" />
@@ -288,6 +323,9 @@
     private string  _yamlOverride  = string.Empty;
     private int?    _selectedAgent;
 
+    private IReadOnlyList<ModelProfile> _profiles     = [];
+    private string?                     _globalProfileId;
+
     private List<AgentDraft> _agents = [];
 
     private sealed class AgentDraft
@@ -304,11 +342,13 @@
         public List<string> Plugins       { get; set; } = [];
     }
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         if (string.IsNullOrWhiteSpace(_workspace))
             _workspace = WorkspaceService.Current;
-        WorkspaceService.Changed += OnWorkspaceChanged;
+        WorkspaceService.Changed       += OnWorkspaceChanged;
+        ProfileService.ProfilesChanged += OnProfilesChanged;
+        _profiles = await ProfileService.ListAsync();
     }
 
     private void OnWorkspaceChanged() =>
@@ -321,7 +361,39 @@
             }
         });
 
-    public void Dispose() => WorkspaceService.Changed -= OnWorkspaceChanged;
+    private void OnProfilesChanged() =>
+        InvokeAsync(async () =>
+        {
+            _profiles = await ProfileService.ListAsync();
+            StateHasChanged();
+        });
+
+    public void Dispose()
+    {
+        WorkspaceService.Changed       -= OnWorkspaceChanged;
+        ProfileService.ProfilesChanged -= OnProfilesChanged;
+    }
+
+    private void OnGlobalProfileChanged(ChangeEventArgs e)
+    {
+        var id = e.Value?.ToString();
+        _globalProfileId = string.IsNullOrEmpty(id) ? null : id;
+        var prof = _profiles.FirstOrDefault(p => p.Id == _globalProfileId);
+        if (prof is not null)
+            _model = prof.ModelId;
+        StateHasChanged();
+    }
+
+    private void ApplyProfileToAgent(int idx, string? profileId)
+    {
+        var prof = _profiles.FirstOrDefault(p => p.Id == profileId);
+        if (prof is null) return;
+        UpdateAgent(idx, d =>
+        {
+            d.ModelOverride = prof.ModelId;
+            d.Endpoint      = prof.Endpoint;
+        });
+    }
 
     private void SelectTemplate(string key) { _selectedKey = key; StateHasChanged(); }
 
