@@ -15,7 +15,7 @@
         <tbody>
             @foreach (var s in Sessions)
             {
-                var canResume = s.Status == SessionStatus.Idle && OnResume is not null;
+                var canResume = s.Status is SessionStatus.Idle or SessionStatus.Cancelled or SessionStatus.Failed && OnResume is not null;
                 var canDelete = s.Status is not (SessionStatus.Running or SessionStatus.Starting) && OnDelete is not null;
                 <tr class="@(OnSelect is not null ? "clickable" : "")"
                     @onclick="() => OnSelect?.Invoke(s.SessionId)">

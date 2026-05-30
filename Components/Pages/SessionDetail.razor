@@ -41,6 +41,10 @@
         {
             <button class="btn btn-danger" @onclick="Cancel">Cancel Session</button>
         }
+        @if (_session.Status is SessionStatus.Cancelled or SessionStatus.Failed)
+        {
+            <button class="btn btn-primary" @onclick="ResumeAsync">Resume Session</button>
+        }
         <a href="/sessions" class="btn">← Back</a>
     </div>
 </div>
@@ -75,6 +79,12 @@
     }
 
     private void Cancel() => SessionService.CancelSession(SessionId);
+
+    private async Task ResumeAsync()
+    {
+        var id = await SessionService.ResumeSessionAsync(SessionId);
+        Nav.NavigateTo($"/sessions/{id}");
+    }
 
     public void Dispose() => SessionService.EventFired -= OnEvent;
 }
