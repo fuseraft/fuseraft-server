@@ -1358,6 +1358,16 @@ code, pre, .mono { font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Menlo, 
   color: var(--text);
 }
 
+.profile-reasoning-pill {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace;
+}
+
 .profile-endpoint {
   font-size: 12px;
   overflow: hidden;

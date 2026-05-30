@@ -10,6 +10,8 @@ public sealed record ModelProfile
     public string Endpoint { get; init; } = string.Empty;
     public string Provider { get; init; } = string.Empty;
 
+    public string? ReasoningEffort { get; init; }
+
     [JsonIgnore]
     public string ApiKeyEnvVar => $"FUSERAFT_PROFILE_{Id}_KEY";
 }

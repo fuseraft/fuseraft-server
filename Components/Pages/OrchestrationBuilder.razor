@@ -160,8 +160,19 @@
                         </div>
                     </div>
 
-                    <!-- FunctionChoice -->
+                    <!-- ReasoningEffort + FunctionChoice -->
                     <div class="agent-editor-row">
+                        <div class="form-group" style="flex:1;">
+                            <label class="form-label">Reasoning Effort</label>
+                            <select class="input" value="@a.ReasoningEffort"
+                                    @onchange="e => UpdateAgent(idx, d => d.ReasoningEffort = e.Value?.ToString() ?? string.Empty)">
+                                <option value="">(not set)</option>
+                                <option value="none">none</option>
+                                <option value="low">low</option>
+                                <option value="medium">medium</option>
+                                <option value="high">high</option>
+                            </select>
+                        </div>
                         <div class="form-group" style="flex:1;">
                             <label class="form-label">FunctionChoice</label>
                             <select class="input" value="@a.FunctionChoice"
@@ -335,6 +346,7 @@
         public string  Instructions       { get; set; } = string.Empty;
         public string  ModelOverride      { get; set; } = string.Empty;
         public string  Endpoint           { get; set; } = string.Empty;
+        public string  ReasoningEffort    { get; set; } = string.Empty;
         public string  FunctionChoice     { get; set; } = string.Empty;
         public double? TrustScore         { get; set; }
         public int?    MaxTokens          { get; set; }
@@ -390,8 +402,9 @@
         if (prof is null) return;
         UpdateAgent(idx, d =>
         {
-            d.ModelOverride = prof.ModelId;
-            d.Endpoint      = prof.Endpoint;
+            d.ModelOverride   = prof.ModelId;
+            d.Endpoint        = prof.Endpoint;
+            d.ReasoningEffort = prof.ReasoningEffort ?? string.Empty;
         });
     }
 

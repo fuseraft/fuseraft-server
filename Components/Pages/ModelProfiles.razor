@@ -29,6 +29,10 @@ else
                         <div class="profile-meta">
                             <span class="profile-provider-pill">@(string.IsNullOrEmpty(p.Provider) ? "provider" : p.Provider)</span>
                             <span class="profile-model">@p.ModelId</span>
+                            @if (!string.IsNullOrEmpty(p.ReasoningEffort))
+                            {
+                                <span class="profile-reasoning-pill">@p.ReasoningEffort</span>
+                            }
                             @if (!string.IsNullOrEmpty(p.Endpoint))
                             {
                                 <span class="profile-endpoint muted">@p.Endpoint</span>
@@ -96,6 +100,18 @@ else
         </div>
 
         <div class="form-group">
+            <label class="form-label">Reasoning Effort</label>
+            <select class="input" @bind="_formReasoningEffort">
+                <option value="">(not set)</option>
+                <option value="none">none</option>
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+            </select>
+            <p class="form-hint">Extended thinking budget. Leave unset for models that don't support it.</p>
+        </div>
+
+        <div class="form-group">
             <label class="form-label">
                 API Key
                 @if (_editId is not null) { <span class="form-label-muted">(leave blank to keep current)</span> }
@@ -138,11 +154,12 @@ else
     private string? _deleteId;
     private string? _formError;
 
-    private string _formName     = string.Empty;
-    private string _formProvider = string.Empty;
-    private string _formModelId  = string.Empty;
-    private string _formEndpoint = string.Empty;
-    private string _formApiKey   = string.Empty;
+    private string _formName            = string.Empty;
+    private string _formProvider        = string.Empty;
+    private string _formModelId         = string.Empty;
+    private string _formEndpoint        = string.Empty;
+    private string _formApiKey          = string.Empty;
+    private string _formReasoningEffort = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -163,11 +180,12 @@ else
     {
         _editId      = null;
         _editHasKey  = false;
-        _formName     = string.Empty;
-        _formProvider = string.Empty;
-        _formModelId  = string.Empty;
-        _formEndpoint = string.Empty;
-        _formApiKey   = string.Empty;
+        _formName            = string.Empty;
+        _formProvider        = string.Empty;
+        _formModelId         = string.Empty;
+        _formEndpoint        = string.Empty;
+        _formApiKey          = string.Empty;
+        _formReasoningEffort = string.Empty;
         _formError    = null;
         _showKey      = false;
         _showForm     = true;
@@ -176,13 +194,14 @@ else
 
     private async Task StartEdit(ModelProfile p)
     {
-        _editId       = p.Id;
-        _editHasKey   = await ProfileService.HasKeyAsync(p.Id);
-        _formName     = p.Name;
-        _formProvider = p.Provider;
-        _formModelId  = p.ModelId;
-        _formEndpoint = p.Endpoint;
-        _formApiKey   = string.Empty;
+        _editId              = p.Id;
+        _editHasKey          = await ProfileService.HasKeyAsync(p.Id);
+        _formName            = p.Name;
+        _formProvider        = p.Provider;
+        _formModelId         = p.ModelId;
+        _formEndpoint        = p.Endpoint;
+        _formApiKey          = string.Empty;
+        _formReasoningEffort = p.ReasoningEffort ?? string.Empty;
         _formError    = null;
         _showKey      = false;
         _showForm     = true;
@@ -215,11 +234,12 @@ else
         {
             var profile = new ModelProfile
             {
-                Id       = _editId ?? Guid.NewGuid().ToString("N")[..12],
-                Name     = _formName.Trim(),
-                Provider = _formProvider,
-                ModelId  = _formModelId.Trim(),
-                Endpoint = _formEndpoint.Trim(),
+                Id              = _editId ?? Guid.NewGuid().ToString("N")[..12],
+                Name            = _formName.Trim(),
+                Provider        = _formProvider,
+                ModelId         = _formModelId.Trim(),
+                Endpoint        = _formEndpoint.Trim(),
+                ReasoningEffort = string.IsNullOrEmpty(_formReasoningEffort) ? null : _formReasoningEffort,
             };
 
             var apiKey = string.IsNullOrWhiteSpace(_formApiKey) ? null : _formApiKey.Trim();
