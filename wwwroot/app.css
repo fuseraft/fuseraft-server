@@ -1305,6 +1305,24 @@ code, pre, .mono { font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Menlo, 
 
 .dir-picker-item:hover .fp-select-inline { opacity: 1; }
 
+/* ===== Orchestration Builder — saved config cards ===== */
+.saved-config-path {
+  font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 10px;
+  word-break: break-all;
+  white-space: normal;
+}
+
+.template-card-selection-badge {
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 99px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace;
+}
+
 /* ===== Model Profiles page ===== */
 .profile-list {
   display: flex;

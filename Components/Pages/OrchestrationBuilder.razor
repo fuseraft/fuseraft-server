@@ -5,6 +5,8 @@
 @inject NavigationManager Nav
 @inject WorkspaceService WorkspaceService
 @inject ModelProfileService ProfileService
+@inject ConfigService ConfigService
+@inject SessionHostService SessionHostService
 
 <PageTitle>Orchestration Builder — Fuseraft</PageTitle>
 
@@ -19,7 +21,32 @@
 
 @if (_step == 1)
 {
-    <p class="muted" style="margin-bottom:20px">Pick a starting template. You can customise everything in the next step.</p>
+    @if (_savedConfigs.Count > 0)
+    {
+        <div class="orch-section-label" style="margin-bottom:10px">Recent</div>
+        <div class="template-grid">
+            @foreach (var cfg in _savedConfigs)
+            {
+                <button class="template-card @(_selectedSavedConfig?.Path == cfg.Path ? "selected" : "")"
+                        @onclick="() => SelectSavedConfig(cfg)">
+                    <div class="template-card-name">@cfg.Name</div>
+                    <div class="template-card-desc saved-config-path">@cfg.Path</div>
+                    <div class="template-card-agents">
+                        @foreach (var a in cfg.AgentNames)
+                        {
+                            <span class="template-card-agent-pill">@a</span>
+                        }
+                        <span class="template-card-selection-badge">@cfg.SelectionType</span>
+                    </div>
+                </button>
+            }
+        </div>
+        <div class="orch-section-label" style="margin-top:24px; margin-bottom:10px">Templates</div>
+    }
+    else
+    {
+        <p class="muted" style="margin-bottom:20px">Pick a starting template. You can customise everything in the next step.</p>
+    }
     <div class="template-grid">
         @foreach (var t in OrchestrationTemplateService.Templates)
         {
@@ -37,8 +64,65 @@
         }
     </div>
     <div style="margin-top:24px; display:flex; gap:10px;">
-        <button class="btn btn-primary" @onclick="GoToStep2" disabled="@(_selectedKey is null)">Next →</button>
+        <button class="btn btn-primary" @onclick="GoToStep2" disabled="@(_selectedKey is null && _selectedSavedConfig is null)">Next →</button>
         <a href="/sessions" class="btn">Cancel</a>
+    </div>
+}
+
+@if (_step == 2 && _selectedSavedConfig is not null)
+{
+    <div class="orch-canvas-section">
+        <!-- Left: config details -->
+        <div style="min-width:0;">
+            <div class="orch-section-label">Orchestration</div>
+            <div class="orch-container">
+                <div class="orch-container-header">
+                    <span class="orch-container-name">@_selectedSavedConfig.Name</span>
+                    <div class="orch-container-meta">
+                        <span class="orch-selection-badge">@_selectedSavedConfig.SelectionType</span>
+                    </div>
+                </div>
+                <div class="orch-agent-flow">
+                    @for (int i = 0; i < _selectedSavedConfig.AgentNames.Count; i++)
+                    {
+                        @if (i > 0) { <div class="orch-agent-slot"><div class="orch-agent-arrow">→</div></div> }
+                        <div class="orch-agent-slot">
+                            <div class="agent-node">
+                                <div class="agent-node-header">
+                                    <span class="agent-node-name">@_selectedSavedConfig.AgentNames[i]</span>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+            <p class="form-hint" style="margin-top:8px; word-break:break-all;">@_selectedSavedConfig.Path</p>
+        </div>
+
+        <!-- Right: side panel -->
+        <div class="orch-side-panel">
+            <div class="form-group">
+                <label class="form-label">Workspace</label>
+                <div class="input-with-btn">
+                    <input class="input" @bind="_workspace" placeholder="/home/user/myproject" />
+                    <button class="btn btn-sm" @onclick="TogglePicker">Browse…</button>
+                </div>
+                @if (_showDirPicker)
+                {
+                    <DirPicker InitialPath="@_workspace" OnSelect="OnDirSelected" OnClose="ClosePicker" />
+                }
+            </div>
+
+            @if (_saveError is not null)
+            {
+                <div class="error-banner">@_saveError</div>
+            }
+
+            <div class="orch-builder-actions">
+                <button class="btn" @onclick="() => _step = 1">← Back</button>
+                <button class="btn btn-primary" @onclick="StartExistingAsync">Start Session</button>
+            </div>
+        </div>
     </div>
 }
 
@@ -283,9 +367,11 @@
         "SubAgent", "Handoff",
     ];
 
-    private int           _step        = 1;
-    private string?       _selectedKey;
-    private TemplateInfo? _template;
+    private int              _step        = 1;
+    private string?          _selectedKey;
+    private TemplateInfo?    _template;
+    private ConfigSummary?   _selectedSavedConfig;
+    private List<ConfigSummary> _savedConfigs = [];
 
     private string  _orchName      = string.Empty;
     private string  _workspace     = string.Empty;
@@ -320,8 +406,23 @@
             _workspace = WorkspaceService.Current;
         WorkspaceService.Changed       += OnWorkspaceChanged;
         ProfileService.ProfilesChanged += OnProfilesChanged;
-        _profiles = await ProfileService.ListAsync();
+        _profiles    = await ProfileService.ListAsync();
+        _savedConfigs = LoadSavedConfigs();
     }
+
+    private List<ConfigSummary> LoadSavedConfigs() =>
+        SessionHostService.GetSessions()
+            .Where(s => !string.IsNullOrEmpty(s.ConfigPath) && File.Exists(s.ConfigPath))
+            .DistinctBy(s => s.ConfigPath, StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .Select(s =>
+            {
+                try   { return ConfigService.Validate(s.ConfigPath).Summary; }
+                catch { return null; }
+            })
+            .Where(s => s is not null)
+            .Select(s => s!)
+            .ToList();
 
     private void OnWorkspaceChanged() =>
         InvokeAsync(() =>
@@ -358,13 +459,22 @@
         });
     }
 
-    private void SelectTemplate(string key) { _selectedKey = key; StateHasChanged(); }
+    private void SelectTemplate(string key)    { _selectedKey = key; _selectedSavedConfig = null; StateHasChanged(); }
+    private void SelectSavedConfig(ConfigSummary cfg) { _selectedSavedConfig = cfg; _selectedKey = null; StateHasChanged(); }
 
-    private async Task GoToStep2()
+    private Task GoToStep2()
     {
-        if (_selectedKey is null) return;
+        if (_selectedSavedConfig is not null)
+        {
+            _template = null;
+            _step     = 2;
+            StateHasChanged();
+            return Task.CompletedTask;
+        }
+
+        if (_selectedKey is null) return Task.CompletedTask;
         _template = TemplateService.GetTemplate(_selectedKey);
-        if (_template is null) return;
+        if (_template is null) return Task.CompletedTask;
 
         _orchName = _template.Name;
         _agents   = _template.DefaultAgents.Select(n => new AgentDraft
@@ -376,6 +486,18 @@
 
         _step = 2;
         StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private Task StartExistingAsync()
+    {
+        _saveError = null;
+        if (_selectedSavedConfig is null) return Task.CompletedTask;
+        if (string.IsNullOrWhiteSpace(_workspace)) { _saveError = "Workspace is required."; StateHasChanged(); return Task.CompletedTask; }
+        var ws  = _workspace.Trim();
+        var cfg = _selectedSavedConfig.Path;
+        Nav.NavigateTo($"/sessions?workspace={Uri.EscapeDataString(ws)}&config={Uri.EscapeDataString(cfg)}&new=true");
+        return Task.CompletedTask;
     }
 
     private void SelectAgent(int idx)
