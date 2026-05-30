@@ -73,7 +73,7 @@
                                     <span class="agent-node-expand">@(_selectedAgent == idx ? "▲" : "▼")</span>
                                 </div>
                                 <div class="agent-node-model">
-                                    @(string.IsNullOrEmpty(agent.ModelOverride) ? _model : agent.ModelOverride)
+                                    @(string.IsNullOrEmpty(agent.ModelOverride) ? "default" : agent.ModelOverride)
                                     @if (!string.IsNullOrEmpty(agent.FunctionChoice))
                                     {
                                         <span class="agent-fc-pill">@agent.FunctionChoice</span>
@@ -233,43 +233,6 @@
 
         <!-- Right: side panel -->
         <div class="orch-side-panel">
-            @if (_profiles.Count > 0)
-            {
-                <div class="form-group">
-                    <label class="form-label">Use Profile</label>
-                    <select class="input" @onchange="OnGlobalProfileChanged">
-                        <option value="">— none —</option>
-                        @foreach (var p in _profiles)
-                        {
-                            <option value="@p.Id">@p.Name (@p.ModelId)</option>
-                        }
-                    </select>
-                    @if (_globalProfileId is not null)
-                    {
-                        var prof = _profiles.FirstOrDefault(p => p.Id == _globalProfileId);
-                        if (prof is not null)
-                        {
-                            <p class="form-hint profile-envvar-hint">API key env: <code>@prof.ApiKeyEnvVar</code></p>
-                        }
-                    }
-                </div>
-            }
-            <div class="form-group">
-                <label class="form-label">Default Model</label>
-                <input class="input" value="@_model" @oninput="OnModelChanged" />
-                <p class="form-hint">Applies to any agent without a model override.</p>
-            </div>
-
-            <div>
-                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
-                    <span class="orch-section-label" style="margin-bottom:0">YAML</span>
-                    <button class="btn btn-sm" @onclick="SyncYamlFromDraft" title="Re-run fuseraft init for the selected template and model">↻ Sync from draft</button>
-                </div>
-                <textarea class="orch-yaml-editor" @bind="_yamlOverride"
-                          placeholder="Generated YAML will appear here…"></textarea>
-                <p class="form-hint">Edit freely. "Sync from draft" overwrites this with the current visual state.</p>
-            </div>
-
             <div class="form-group">
                 <label class="form-label">Workspace</label>
                 <div class="input-with-btn">
@@ -324,18 +287,15 @@
     private string?       _selectedKey;
     private TemplateInfo? _template;
 
-    private string  _model         = "claude-opus-4-5";
     private string  _orchName      = string.Empty;
     private string  _workspace     = string.Empty;
     private string  _configRelPath = ".fuseraft/config/orchestration.yaml";
     private bool    _showDirPicker = false;
     private bool    _saving        = false;
     private string? _saveError;
-    private string  _yamlOverride  = string.Empty;
     private int?    _selectedAgent;
 
-    private IReadOnlyList<ModelProfile> _profiles     = [];
-    private string?                     _globalProfileId;
+    private IReadOnlyList<ModelProfile> _profiles = [];
 
     private List<AgentDraft> _agents = [];
 
@@ -386,16 +346,6 @@
         ProfileService.ProfilesChanged -= OnProfilesChanged;
     }
 
-    private void OnGlobalProfileChanged(ChangeEventArgs e)
-    {
-        var id = e.Value?.ToString();
-        _globalProfileId = string.IsNullOrEmpty(id) ? null : id;
-        var prof = _profiles.FirstOrDefault(p => p.Id == _globalProfileId);
-        if (prof is not null)
-            _model = prof.ModelId;
-        StateHasChanged();
-    }
-
     private void ApplyProfileToAgent(int idx, string? profileId)
     {
         var prof = _profiles.FirstOrDefault(p => p.Id == profileId);
@@ -425,18 +375,6 @@
         _selectedAgent = null;
 
         _step = 2;
-        StateHasChanged();
-
-        var tmp = Path.Combine(Path.GetTempPath(), $"fuseraft-init-{Guid.NewGuid():N}.yaml");
-        try
-        {
-            var (ok, yaml, _) = await RunInitAsync(tmp);
-            _yamlOverride = ok ? yaml : string.Empty;
-        }
-        finally
-        {
-            if (File.Exists(tmp)) File.Delete(tmp);
-        }
         StateHasChanged();
     }
 
@@ -474,28 +412,6 @@
         StateHasChanged();
     }
 
-    private void OnModelChanged(ChangeEventArgs e)
-    {
-        _model = e.Value?.ToString() ?? _model;
-        StateHasChanged();
-    }
-
-    private async Task SyncYamlFromDraft()
-    {
-        var tmp = Path.Combine(Path.GetTempPath(), $"fuseraft-init-{Guid.NewGuid():N}.yaml");
-        try
-        {
-            var (ok, yaml, err) = await RunInitAsync(tmp);
-            if (ok) _yamlOverride = yaml;
-            else    _saveError    = string.IsNullOrWhiteSpace(err) ? "fuseraft init failed." : err;
-        }
-        finally
-        {
-            if (File.Exists(tmp)) File.Delete(tmp);
-        }
-        StateHasChanged();
-    }
-
     private async Task<(bool Ok, string Yaml, string Error)> RunInitAsync(string outputPath)
     {
         try
@@ -517,7 +433,9 @@
             psi.ArgumentList.Add("-t");
             psi.ArgumentList.Add(_selectedKey ?? "minimal");
             psi.ArgumentList.Add("-m");
-            psi.ArgumentList.Add(_model);
+            psi.ArgumentList.Add(
+                _agents.Select(a => a.ModelOverride).FirstOrDefault(m => !string.IsNullOrEmpty(m))
+                ?? "claude-opus-4-5");
             psi.ArgumentList.Add("--no-interactive");
 
             using var proc = Process.Start(psi)!;
@@ -571,9 +489,8 @@
             var relPath = _configRelPath.Trim();
             var absPath = Path.IsPathRooted(relPath) ? relPath : Path.GetFullPath(Path.Combine(ws, relPath));
 
-            var (ok, yaml, err) = await RunInitAsync(absPath);
+            var (ok, _, err) = await RunInitAsync(absPath);
             if (!ok) { _saveError = string.IsNullOrWhiteSpace(err) ? "fuseraft init failed." : err; return false; }
-            _yamlOverride = yaml;
             return true;
         }
         catch (Exception ex) { _saveError = ex.Message; return false; }
