@@ -65,37 +65,6 @@ The project ships with a `Properties/launchSettings.json` that sets `ASPNETCORE_
 
 ---
 
-## Project structure
-
-```
-fuseraft-server/
-  Components/
-    Layout/        # MainLayout, NavMenu
-    Pages/         # Dashboard, Sessions, SessionDetail, OrchestrationBuilder,
-                   # ModelProfiles, Plugins, Schedule, Context, Configs, Hitl
-    Shared/        # DirPicker, FilePicker, LiveFeed, SessionTable, StatusBadge, AgentCard, ...
-  Models/
-    ManagedSession.cs              # In-memory session state
-    ModelProfile.cs                # Stored model/endpoint/provider record
-    SessionEvent.cs                # Streamed session event payload
-    PendingApproval.cs             # HITL approval request
-  Services/
-    SessionHostService.cs          # Runs fuseraft-cli sessions in-process
-    HitlBroker.cs                  # Manages pending HITL requests
-    ModelProfileService.cs         # CRUD + OS keychain storage for model profiles
-    ScheduleService.cs             # Cron-based session scheduler
-    OrchestrationTemplateService.cs # Template metadata + YAML generation
-    PluginCatalogService.cs        # Reflects plugin functions from PluginRegistry
-    ConfigService.cs               # Lists and validates orchestration YAML files
-    ContextService.cs              # Manages workspace context documents
-    WorkspaceService.cs            # Tracks current workspace directory
-  wwwroot/
-    app.css        # All styles (dark theme, component styles)
-    fuseraft.svg   # Logo
-```
-
----
-
 ## License
 
 MIT — see [LICENSE](LICENSE).
