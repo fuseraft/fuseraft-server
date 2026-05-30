@@ -1361,6 +1361,129 @@ code, pre, .mono { font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Menlo, 
   font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace;
 }
 
+/* ===== Memory viewer ===== */
+.memory-scope-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.memory-scope-tab {
+  padding: 5px 14px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: border-color .15s, color .15s;
+}
+
+.memory-scope-tab:hover  { border-color: var(--border2); color: var(--text); }
+.memory-scope-tab.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+
+.memory-count-badge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 99px;
+  background: var(--surface2);
+  color: var(--muted);
+}
+
+.memory-type-section { margin-bottom: 24px; }
+
+.memory-type-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.memory-type-pill {
+  font-size: 11px;
+  padding: 2px 9px;
+  border-radius: 99px;
+  font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.memory-type-user      { background: rgba(88,166,255,.15); color: #58a6ff; }
+.memory-type-project   { background: rgba(63,185,80,.15);  color: #3fb950; }
+.memory-type-feedback  { background: rgba(210,153,34,.15); color: #d29922; }
+.memory-type-reference { background: rgba(188,140,255,.15); color: #bc8cff; }
+/* fallback for unknown types */
+.memory-type-pill:not(.memory-type-user):not(.memory-type-project):not(.memory-type-feedback):not(.memory-type-reference) {
+  background: var(--surface2);
+  color: var(--muted);
+}
+
+.memory-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  margin-bottom: 6px;
+  overflow: hidden;
+  transition: border-color .15s;
+}
+
+.memory-card:hover         { border-color: var(--border2); }
+.memory-card-deleting      { border-color: rgba(248,81,73,.4) !important; }
+
+.memory-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.memory-card-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.memory-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace;
+}
+
+.memory-desc {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.memory-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.memory-card-body {
+  padding: 10px 14px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+  border-top: 1px solid var(--border2);
+  white-space: pre-wrap;
+  font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace;
+  background: var(--surface2);
+}
+
 /* ===== Model Profiles page ===== */
 .profile-list {
   display: flex;

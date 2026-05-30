@@ -1,0 +1,143 @@
+@page "/memory"
+@inject MemoryService MemoryService
+
+<PageTitle>Memory — Fuseraft</PageTitle>
+
+<div class="page-header">
+    <h1>Memory</h1>
+    <p class="muted">Persistent facts recalled by agents and the REPL across sessions.</p>
+</div>
+
+@if (_loading)
+{
+    <p class="muted">Loading…</p>
+}
+else
+{
+    <!-- Scope tabs -->
+    <div class="memory-scope-tabs">
+        <button class="memory-scope-tab @(_scope == "repl" ? "active" : "")"
+                @onclick='() => SetScope("repl")'>
+            REPL
+            <span class="memory-count-badge">@_replEntries.Count</span>
+        </button>
+        @foreach (var kv in _agentEntries)
+        {
+            var key = kv.Key;
+            <button class="memory-scope-tab @(_scope == key ? "active" : "")"
+                    @onclick="() => SetScope(key)">
+                @kv.Key
+                <span class="memory-count-badge">@kv.Value.Count</span>
+            </button>
+        }
+    </div>
+
+    @if (ScopedEntries.Count == 0)
+    {
+        <div class="empty-state">No memories in this scope.</div>
+    }
+    else
+    {
+        @foreach (var group in ScopedEntries.GroupBy(e => e.Type).OrderBy(g => g.Key))
+        {
+            <div class="memory-type-section">
+                <div class="memory-type-header">
+                    <span class="memory-type-pill memory-type-@group.Key">@group.Key</span>
+                    <span class="muted" style="font-size:12px">@group.Count() @(group.Count() == 1 ? "entry" : "entries")</span>
+                </div>
+
+                @foreach (var entry in group.OrderBy(e => e.Name))
+                {
+                    var isExpanded = _expanded.Contains(entry.Guid);
+                    var isDeleting = _deleteTarget == (entry.Guid, _scope);
+                    <div class="memory-card @(isDeleting ? "memory-card-deleting" : "")">
+                        <div class="memory-card-header" @onclick="() => ToggleExpand(entry.Guid)">
+                            <div class="memory-card-title">
+                                <span class="memory-name">@entry.Name</span>
+                                <span class="memory-desc muted">@entry.Description</span>
+                            </div>
+                            <div class="memory-card-actions" @onclick:stopPropagation>
+                                @if (!isDeleting)
+                                {
+                                    <button class="btn btn-sm" @onclick="() => ToggleExpand(entry.Guid)">
+                                        @(isExpanded ? "▲" : "▼")
+                                    </button>
+                                    <button class="btn btn-sm btn-danger"
+                                            @onclick="() => StartDelete(entry.Guid, _scope)">Delete</button>
+                                }
+                                else
+                                {
+                                    <span class="muted" style="font-size:12px">Delete?</span>
+                                    <button class="btn btn-sm btn-danger"
+                                            @onclick="() => ConfirmDeleteAsync(entry.Name)">Confirm</button>
+                                    <button class="btn btn-sm" @onclick="CancelDelete">Cancel</button>
+                                }
+                            </div>
+                        </div>
+                        @if (isExpanded && !string.IsNullOrWhiteSpace(entry.Body))
+                        {
+                            <div class="memory-card-body">@entry.Body</div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    }
+}
+
+@code {
+    private bool   _loading = true;
+    private string _scope   = "repl";
+
+    private List<MemoryEntry> ScopedEntries =>
+        _scope == "repl"
+            ? _replEntries
+            : (_agentEntries.TryGetValue(_scope, out var ae) ? ae : []);
+
+    private List<MemoryEntry>                        _replEntries  = [];
+    private Dictionary<string, List<MemoryEntry>>   _agentEntries = [];
+    private HashSet<string>                          _expanded     = [];
+    private (string Guid, string Scope)?             _deleteTarget;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+        _loading = false;
+    }
+
+    private async Task ReloadAsync()
+    {
+        _replEntries  = await MemoryService.GetReplMemoriesAsync();
+        _agentEntries = await MemoryService.GetAgentMemoriesAsync();
+
+        // If current scope no longer exists, fall back to repl
+        if (_scope != "repl" && !_agentEntries.ContainsKey(_scope))
+            _scope = "repl";
+    }
+
+    private void SetScope(string scope) { _scope = scope; _deleteTarget = null; StateHasChanged(); }
+
+    private void ToggleExpand(string guid)
+    {
+        if (!_expanded.Add(guid)) _expanded.Remove(guid);
+        StateHasChanged();
+    }
+
+    private void StartDelete(string guid, string scope) { _deleteTarget = (guid, scope); StateHasChanged(); }
+    private void CancelDelete()                         { _deleteTarget = null; StateHasChanged(); }
+
+    private async Task ConfirmDeleteAsync(string name)
+    {
+        if (_deleteTarget is null) return;
+        var (_, scope) = _deleteTarget.Value;
+        _deleteTarget = null;
+
+        if (scope == "repl")
+            await MemoryService.DeleteReplMemoryAsync(name);
+        else
+            await MemoryService.DeleteAgentMemoryAsync(scope, name);
+
+        await ReloadAsync();
+        StateHasChanged();
+    }
+}
