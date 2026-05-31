@@ -18,6 +18,7 @@ builder.Services.AddSingleton<ConfigService>();
 builder.Services.AddSingleton<WorkspaceService>();
 builder.Services.AddSingleton<ModelProfileService>();
 builder.Services.AddSingleton<MemoryService>();
+builder.Services.AddSingleton<ReplService>();
 
 var app = builder.Build();
 

@@ -1,0 +1,297 @@
+@page "/repl"
+@implements IDisposable
+@inject ReplService ReplService
+@inject ModelProfileService ProfileService
+
+<PageTitle>REPL — Fuseraft</PageTitle>
+
+<div class="page-header">
+    <h1>REPL</h1>
+    @if (_activeSessionId is not null)
+    {
+        <button class="btn" @onclick="CloseSession">← New Session</button>
+    }
+</div>
+
+@if (_activeSessionId is null)
+{
+    @if (_profiles.Count == 0)
+    {
+        <div class="empty-state">
+            <div class="empty-icon">⊙</div>
+            <p>No model profiles configured.</p>
+            <p class="muted">Add a profile in <a href="/model-profiles">Profiles</a> to get started.</p>
+        </div>
+    }
+    else
+    {
+        <div class="repl-start">
+            <div class="form-group">
+                <label class="form-label">Model Profile</label>
+                <select class="input" @bind="_selectedProfileId">
+                    @foreach (var p in _profiles)
+                    {
+                        <option value="@p.Id">@p.Name — @p.ModelId</option>
+                    }
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">System Prompt <span class="muted small">(optional)</span></label>
+                <textarea class="input repl-sysprompt"
+                          value="@_systemPrompt"
+                          @oninput="@(e => _systemPrompt = e.Value?.ToString() ?? "")"
+                          placeholder="You are a helpful assistant."
+                          rows="3"></textarea>
+            </div>
+            <div>
+                <button class="btn btn-primary" @onclick="StartSessionAsync" disabled="@_starting">
+                    @(_starting ? "Starting…" : "Start Session")
+                </button>
+            </div>
+        </div>
+
+        @if (_snapshots.Count > 0)
+        {
+            <div class="repl-history">
+                <h2>Recent Sessions</h2>
+                <div class="table-wrapper">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Session</th>
+                                <th>Model</th>
+                                <th>Turns</th>
+                                <th>Last Active</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var snap in _snapshots)
+                            {
+                                <tr>
+                                    <td class="mono small">@snap.SessionId</td>
+                                    <td class="small muted">@snap.ModelId</td>
+                                    <td class="small muted">@snap.TurnIndex</td>
+                                    <td class="small muted">@snap.LastUpdatedAt.ToString("MMM d, HH:mm")</td>
+                                    <td>
+                                        <button class="btn btn-sm"
+                                                @onclick="() => ResumeSnapshotAsync(snap.SessionId)">
+                                            Resume
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+    }
+}
+else
+{
+    var session = ReplService.GetSession(_activeSessionId!);
+    if (session is null)
+    {
+        <p class="muted">Session not found.</p>
+    }
+    else
+    {
+        <div class="repl-session-bar">
+            <code class="repl-session-id">@session.SessionId</code>
+            <span class="muted small">@session.ModelId</span>
+            @if (session.Status == ReplStatus.Thinking)
+            {
+                @if (session.StreamingTools is not null)
+                {
+                    <span class="muted small">⚙ @session.StreamingTools</span>
+                }
+                else
+                {
+                    <span class="muted small">thinking…</span>
+                }
+            }
+            <div style="margin-left:auto;display:flex;gap:6px">
+                <button class="btn btn-sm" @onclick="Clear"
+                        disabled="@(session.Status == ReplStatus.Thinking)">
+                    Clear
+                </button>
+                <button class="btn btn-sm" @onclick="CloseSession">Close</button>
+            </div>
+        </div>
+
+        @if (session.Error is not null)
+        {
+            <div class="error-banner">@session.Error</div>
+        }
+
+        <div class="repl-transcript">
+            @foreach (var msg in session.Messages.ToList())
+            {
+                <div class="repl-msg repl-msg-@msg.Role">
+                    @if (msg.Role != "system")
+                    {
+                        <div class="repl-msg-role">@(msg.Role == "user" ? "You" : "Assistant")</div>
+                    }
+                    @if (msg.Role == "assistant" || msg.Role == "system")
+                    {
+                        <Markdown Text="@msg.Text" />
+                    }
+                    else
+                    {
+                        <div class="repl-msg-text">@msg.Text</div>
+                    }
+                    @if (msg.ToolCalls.Count > 0)
+                    {
+                        <div class="repl-tool-chips">
+                            @foreach (var tool in msg.ToolCalls)
+                            {
+                                <span class="tool-call-chip"><span class="tool-call-name">@tool</span></span>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (session.Status == ReplStatus.Thinking)
+            {
+                <div class="repl-msg repl-msg-assistant repl-streaming">
+                    <div class="repl-msg-role">Assistant</div>
+                    @if (!string.IsNullOrEmpty(session.StreamingText))
+                    {
+                        <Markdown Text="@session.StreamingText" />
+                        <span class="repl-cursor">▋</span>
+                    }
+                    else
+                    {
+                        <div class="repl-thinking-dots">
+                            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+
+        <div class="repl-input-area">
+            <textarea class="repl-textarea"
+                      value="@_input"
+                      @oninput="@(e => _input = e.Value?.ToString() ?? "")"
+                      @onkeydown="OnKeyDown"
+                      placeholder="Type a message… (Ctrl+Enter to send)"
+                      disabled="@(session.Status == ReplStatus.Thinking)"
+                      rows="3"></textarea>
+            <div class="repl-input-actions">
+                @if (session.Status == ReplStatus.Thinking)
+                {
+                    <button class="btn btn-danger" @onclick="Cancel">Stop</button>
+                }
+                else
+                {
+                    <button class="btn btn-primary" @onclick="Send"
+                            disabled="@string.IsNullOrWhiteSpace(_input)">
+                        Send
+                    </button>
+                }
+                <span class="muted small" style="margin-left:auto">Ctrl+Enter to send</span>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private IReadOnlyList<ModelProfile>         _profiles  = [];
+    private IReadOnlyList<ReplSessionSnapshot>  _snapshots = [];
+    private string? _activeSessionId;
+    private string  _input           = "";
+    private string  _selectedProfileId = "";
+    private string  _systemPrompt    = "";
+    private bool    _starting        = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _profiles  = await ProfileService.ListAsync();
+        _snapshots = await ReplService.ListSnapshotsAsync();
+
+        if (_profiles.Count > 0)
+            _selectedProfileId = _profiles[0].Id;
+
+        // Re-attach to any session left open from a previous page visit.
+        _activeSessionId = ReplService.GetSessions().FirstOrDefault()?.Key;
+
+        ReplService.SessionChanged += OnSessionChanged;
+    }
+
+    private void OnSessionChanged(string sessionId)
+    {
+        if (sessionId != _activeSessionId) return;
+        InvokeAsync(async () =>
+        {
+            // Session was removed (process exited or /exit sent) — go back to new-session view.
+            if (ReplService.GetSession(sessionId) is null)
+            {
+                _activeSessionId = null;
+                _snapshots = await ReplService.ListSnapshotsAsync();
+            }
+            StateHasChanged();
+        });
+    }
+
+    private async Task StartSessionAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedProfileId)) return;
+        _starting = true;
+        StateHasChanged();
+        try
+        {
+            _activeSessionId = await ReplService.CreateSessionAsync(_selectedProfileId, _systemPrompt);
+        }
+        catch (Exception ex)
+        {
+            // Surface the error briefly via the error-banner pattern
+            _activeSessionId = null;
+            _ = ex;
+        }
+        finally
+        {
+            _starting = false;
+        }
+    }
+
+    private async Task ResumeSnapshotAsync(string snapshotId)
+    {
+        try
+        {
+            _activeSessionId = await ReplService.ResumeSnapshotAsync(snapshotId);
+            _snapshots = await ReplService.ListSnapshotsAsync();
+        }
+        catch { }
+    }
+
+    private void Send()
+    {
+        var text = _input.Trim();
+        if (string.IsNullOrEmpty(text) || _activeSessionId is null) return;
+        _input = "";
+        ReplService.SendMessage(_activeSessionId, text);
+    }
+
+    private void Cancel() => ReplService.CancelSession(_activeSessionId!);
+
+    private void Clear() => ReplService.ClearSession(_activeSessionId!);
+
+    private void CloseSession()
+    {
+        var id = _activeSessionId;
+        _activeSessionId = null;
+        if (id is not null)
+            ReplService.CloseSession(id);
+    }
+
+    private void OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && (e.CtrlKey || e.MetaKey) && !string.IsNullOrWhiteSpace(_input))
+            Send();
+    }
+
+    public void Dispose() => ReplService.SessionChanged -= OnSessionChanged;
+}

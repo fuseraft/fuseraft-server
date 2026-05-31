@@ -1,0 +1,17 @@
+@using Markdig
+@using Microsoft.AspNetCore.Components
+
+<div class="md">@((MarkupString)_html)</div>
+
+@code {
+    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .Build();
+
+    [Parameter, EditorRequired] public string Text { get; set; } = "";
+
+    private string _html = "";
+
+    protected override void OnParametersSet() =>
+        _html = Markdig.Markdown.ToHtml(Text ?? "", Pipeline);
+}

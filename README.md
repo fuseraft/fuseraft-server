@@ -40,6 +40,17 @@ Validate existing orchestration YAML files. The panel shows agent names, selecti
 ### Schedule
 Define recurring orchestration runs on a cron schedule.
 
+### REPL
+An interactive chat interface backed by the fuseraft CLI REPL — the same engine that powers the VS Code extension and the `fuseraft repl` terminal command.
+
+- Select any configured **Model Profile** to start a session; API keys are injected automatically from the profile store
+- Full slash-command support (`/help`, `/clear`, `/compact`, `/plan`, `/execute`, `/system`, `/safe-mode`, and all other built-in commands) — handled natively by the CLI process, not re-implemented in the server
+- Tool use enabled by default: FileSystem, Shell, Search, Git, and Http tools are available to the model
+- Streaming tokens and tool-call badges update in real-time as the model responds
+- Assistant responses are rendered as Markdown (code blocks, tables, lists, etc.)
+- Sessions are persisted to `~/.fuseraft/repl-sessions/` after each turn; past sessions appear in the **Recent Sessions** table and can be resumed at any time
+- Internally the server spawns `fuseraft repl --vscode --no-banner` and speaks the same JSON-line protocol (`ready`, `token`, `tool_call`, `message_end`, `plan`, `step_status`, `session_end`, …) used by the VS Code extension
+
 ### HITL (Human-in-the-Loop)
 Agents can pause and request human input mid-run. The HITL panel shows pending prompts with a badge count in the nav, lets you respond or redirect, and unblocks the waiting agent automatically.
 
