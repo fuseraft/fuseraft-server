@@ -170,7 +170,7 @@ public sealed class SessionHostService : IDisposable
                     : Path.GetFullPath(session.ConfigPath);
             var hitlService = new WebHumanApprovalService(_hitlBroker, session.SessionId);
 
-            var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, govKernel, skillCurator) =
+            var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, govKernel, skillCurator, _, _, _) =
                 await OrchestratorBuilder.BuildAsync(
                     absConfig, _loggerFactory, _pluginRegistry, hitlService,
                     hitlMode: false, cancellationToken: ct);
