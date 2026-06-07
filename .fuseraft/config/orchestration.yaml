@@ -4,6 +4,9 @@ Orchestration:
     Planner → Developer → Tester → Reviewer with state machine routing,
     evidence contracts, failure handling, and self-verification.
 
+  Security:
+    FileSystemSandboxPath: .   # set to your project root (e.g. ~/projects/myapp)
+
   EvidenceStore:
     Path: .fuseraft/state/evidence.json
 
@@ -47,6 +50,14 @@ Orchestration:
     NoProgress:
       Action: Abort
       Threshold: 3
+    # Hard backstop: escalate to HITL after this many consecutive contract
+    # failures on any transition, regardless of per-type action. Prevents
+    # Reinstruct from looping indefinitely when a contract cannot be satisfied.
+    MaxConsecutiveContractFailures: 6
+    # Escalate to HITL when an agent runs this many turns without emitting
+    # any routing signal. Survives compaction — unlike the history-scan loop
+    # warning — so it catches agents stuck after repeated compaction cycles.
+    MaxConsecutiveTurnsWithoutSignal: 8
 
   Verifier:
     AgentName: Verifier
@@ -59,12 +70,20 @@ Orchestration:
     KeepRecentTurns: 8
     Mode: lossless
 
+  # WarnTurnTokens: warn when a single turn's input exceeds this value.
+  # Keep this below ContextBudget.CutoverAt so the warning fires before
+  # compaction is forced, giving an advance signal rather than a post-hoc note.
+  WarnTurnTokens: 60000
+
   # ContextBudget: per-agent cumulative input-token thresholds. Warns before
   # context rot sets in, then triggers compaction automatically. Counters reset
   # after each compaction cycle so the session can run indefinitely.
-  # ContextBudget:
-  #   WarnAt: 80000
-  #   CutoverAt: 120000
+  # MaxSingleTurnInputTokens guards against single-turn explosions that exhaust
+  # the cumulative budget in one shot — compaction fires before the next turn.
+  ContextBudget:
+    WarnAt: 60000
+    CutoverAt: 100000
+    MaxSingleTurnInputTokens: 200000
 
   Events:
     Path: .fuseraft/logs/events.jsonl
@@ -134,11 +153,6 @@ Orchestration:
   # OPTIONAL EXTRAS — uncomment and fill in as needed
   # ---------------------------------------------------------------------------
 
-  # Security:
-  #   FileSystemSandboxPath: ~/my-project
-  #   HttpAllowedHosts:
-  #     - api.github.com
-
   # MaxTotalTokens: 500000
 
   # McpServers:
@@ -155,3 +169,4 @@ Orchestration:
   #     ModelId: grok-4.3
   #   reasoning:
   #     ModelId: grok-4.3
+  #     ReasoningEffort: low

@@ -2,27 +2,34 @@ Name: Tester
 Description: Writes and runs tests, produces a structured report.
 Instructions: |
   You are a QA engineer. Your job is to:
-  1. Read .fuseraft/brief.json to understand acceptance criteria.
-  2. Write tests and run them with shell_run.
-  3. Write results to .fuseraft/test-report.json:
+  1. Call session_context_read. If a prior summary exists, use it to catch up — do not re-read files that are already described there.
+  2. Read .fuseraft/artifacts/sessions/{session_id}/brief.json to understand acceptance criteria.
+  3. Write test scripts (any format) to .fuseraft/tests/ and any
+     fixture or seed files to .fuseraft/tests/fixtures/. Run them with shell_run.
+  4. Write results to .fuseraft/artifacts/test-report.json:
        passed — true if every criterion passes, false otherwise
        results — array of objects:
          PASS: name, status, exit_code, command (exact shell_run command — required)
          FAIL: name, status, exit_code, command, output (relevant stderr/stdout from the failure — required)
   A PASS result with an empty or missing command field is treated as fabricated and will block handoff.
   Always write the report before routing, even when tests fail.
+  5. Call session_context_write with a short bullet summary: what you accomplished, which files changed, and any open issues (keep it under 200 words).
   If all pass, call handoff(route_keyword: "HANDOFF TO REVIEWER").
   If any fail, call handoff(route_keyword: "BUGS FOUND").
 Model:
   ModelId: grok-4.3
   Endpoint: https://api.x.ai/v1
-  ReasoningEffort: none
 Plugins:
   - FileSystem
   - Shell
   - Changes
+  - SessionContext
   - Handoff
 FunctionChoice: required
+MaxInTurnToolPairs: 12
+ContextWindow:
+  TextOnly: true
+  MaxTurnAge: 6
 
 # -- Optional overrides -------------------------------------------------------
 # ContextWindow:
@@ -33,6 +40,7 @@ FunctionChoice: required
 # FunctionChoice: required  # force at least one tool call per turn (auto|required|none)
 # TrustScore: 0.8           # 0.0–1.0; governs sandbox ring (≥0.8 → ring 1)
 # MaxToolCallsPerTurn: 20
+# MaxInTurnToolPairs: 12        # sliding window: keep only last N tool results per turn (deterministic)
 # MaxTokens: 4096
 # Capabilities:             # per-plugin tool allowlist
 #   Shell: [shell_run]
