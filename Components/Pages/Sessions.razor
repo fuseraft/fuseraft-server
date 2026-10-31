@@ -65,6 +65,15 @@
     </div>
 }
 
+@if (SessionService.HistoryError is { } historyError)
+{
+    <div class="error-banner">Couldn't load past sessions from fuseraft: @historyError</div>
+}
+@if (_listError is not null)
+{
+    <div class="error-banner">@_listError</div>
+}
+
 <div class="filter-bar">
     @foreach (var f in new[] { "All", "Running", "Succeeded", "Failed", "Cancelled" })
     {
@@ -85,11 +94,12 @@
     private string _newWorkspace  = string.Empty;
     private string _newConfig     = ".fuseraft/config/orchestration.yaml";
     private string? _startError;
+    private string? _listError;
     private string _filter = "All";
 
     private IEnumerable<ManagedSession> Filtered => _filter switch
     {
-        "Running"   => SessionService.GetSessions().Where(s => s.Status is SessionStatus.Running or SessionStatus.Starting),
+        "Running"   => SessionService.GetSessions().Where(s => s.IsLive),
         "Succeeded" => SessionService.GetSessions().Where(s => s.Status == SessionStatus.Succeeded),
         "Failed"    => SessionService.GetSessions().Where(s => s.Status == SessionStatus.Failed),
         "Cancelled" => SessionService.GetSessions().Where(s => s.Status == SessionStatus.Cancelled),
@@ -160,19 +170,34 @@
         }
     }
 
-    private void DeleteSession(string sessionId)
+    private void DeleteSession(string sessionId) => _ = DeleteSessionAsync(sessionId);
+
+    private async Task DeleteSessionAsync(string sessionId)
     {
-        _ = SessionService.DeleteSessionAsync(sessionId);
+        _listError = null;
+        try
+        {
+            await SessionService.DeleteSessionAsync(sessionId);
+        }
+        catch (Exception ex)
+        {
+            _listError = $"Couldn't delete {sessionId}: {ex.Message}";
+        }
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task ResumeSessionAsync(string sessionId)
     {
+        _listError = null;
         try
         {
             var id = await SessionService.ResumeSessionAsync(sessionId);
             Nav.NavigateTo($"/sessions/{id}");
         }
-        catch { /* session may have been deleted; list will refresh */ }
+        catch (Exception ex)
+        {
+            _listError = $"Couldn't resume {sessionId}: {ex.Message}";
+        }
     }
 
     public void Dispose()

@@ -1,5 +1,5 @@
-/bin
-/obj
+bin/
+obj/
 
 # fuseraft runtime artifacts — config/ and context/ remain tracked
 .fuseraft/*

@@ -4,10 +4,8 @@ using fuseraft.Server.Models;
 namespace fuseraft.Server.Services;
 
 /// <summary>
-/// Mediates between the running orchestrator (which calls IHumanApprovalService methods)
-/// and the Blazor HITL page (which renders pending items and calls Respond).
-/// Each approval request parks the orchestrator's async call via TaskCompletionSource
-/// until the operator responds in the browser.
+/// Holds every approval a fuseraft process is waiting on, for the HITL page (and the REPL page) to
+/// answer. Each request parks its process's <see cref="ApprovalRelay"/> until someone responds.
 /// </summary>
 public sealed class HitlBroker
 {
@@ -18,39 +16,35 @@ public sealed class HitlBroker
     public IReadOnlyCollection<PendingApproval> GetPending() =>
         _pending.Values.OrderBy(p => p.Created).ToList();
 
-    public PendingApproval Enqueue(string sessionId, HitlRequestType type, string prompt)
+    public IReadOnlyCollection<PendingApproval> GetPending(string sessionId) =>
+        _pending.Values.Where(p => p.SessionId == sessionId).OrderBy(p => p.Created).ToList();
+
+    public PendingApproval Enqueue(PendingApproval request)
     {
-        var req = new PendingApproval
-        {
-            Id        = Guid.NewGuid(),
-            SessionId = sessionId,
-            Type      = type,
-            Prompt    = prompt,
-            Tcs       = new TaskCompletionSource<HitlResponse>(
-                            TaskCreationOptions.RunContinuationsAsynchronously),
-        };
-        _pending[req.Id] = req;
+        _pending[request.Id] = request;
         PendingChanged?.Invoke();
-        return req;
+        return request;
     }
 
-    public void Respond(Guid id, HitlResponse response)
+    public void Respond(Guid id, bool approved)
     {
         if (_pending.TryRemove(id, out var req))
         {
-            req.Tcs.TrySetResult(response);
+            req.Tcs.TrySetResult(approved);
             PendingChanged?.Invoke();
         }
     }
 
+    /// <summary>Denies everything a session is still waiting on — it was cancelled or its process is gone.</summary>
     public void CancelSession(string sessionId)
     {
+        var any = false;
         foreach (var (key, req) in _pending)
         {
-            if (req.SessionId != sessionId) continue;
-            if (_pending.TryRemove(key, out _))
-                req.Tcs.TrySetResult(new HitlResponse(HitlAction.Abort));
+            if (req.SessionId != sessionId || !_pending.TryRemove(key, out _)) continue;
+            req.Tcs.TrySetResult(false);
+            any = true;
         }
-        PendingChanged?.Invoke();
+        if (any) PendingChanged?.Invoke();
     }
 }

@@ -1,9 +1,17 @@
 @page "/sessions/{SessionId}"
 @implements IDisposable
 @inject SessionHostService SessionService
+@inject HitlBroker Broker
 @inject NavigationManager Nav
 
 <PageTitle>@SessionId — Fuseraft</PageTitle>
+
+@if (_loading)
+{
+    <div class="page-header"><h1>@SessionId</h1></div>
+    <p class="muted">Loading…</p>
+    return;
+}
 
 @if (_session is null)
 {
@@ -28,22 +36,24 @@
             }
             <span> · Duration @_session.DurationLabel</span>
         </p>
-        @if (!string.IsNullOrEmpty(_session.WorkspaceDir))
+        @if (!string.IsNullOrEmpty(_session.WorkingDirectory))
         {
             <p class="session-workspace muted">
                 <span class="workspace-label">Workspace</span>
-                <code class="workspace-path">@_session.WorkspaceDir</code>
+                <code class="workspace-path">@_session.WorkingDirectory</code>
             </p>
         }
     </div>
     <div class="header-actions">
-        @if (_session.Status is SessionStatus.Running or SessionStatus.Starting)
+        @if (_session.IsLive)
         {
             <button class="btn btn-danger" @onclick="Cancel">Cancel Session</button>
         }
-        @if (_session.Status is SessionStatus.Cancelled or SessionStatus.Failed)
+        @if (_session.Status is SessionStatus.Idle or SessionStatus.Cancelled or SessionStatus.Failed)
         {
-            <button class="btn btn-primary" @onclick="ResumeAsync">Resume Session</button>
+            <button class="btn btn-primary" @onclick="ResumeAsync" disabled="@_resuming">
+                @(_resuming ? "Resuming…" : "Resume Session")
+            </button>
         }
         <a href="/sessions" class="btn">← Back</a>
     </div>
@@ -53,38 +63,92 @@
 {
     <div class="error-banner">@_session.ErrorMessage</div>
 }
+@if (_actionError is not null)
+{
+    <div class="error-banner">@_actionError</div>
+}
 
 <LiveFeed Events="@_events" />
+
+@foreach (var req in _approvals)
+{
+    <ApprovalCard @key="req.Id" Request="req" ShowSource="false" />
+}
 
 @code {
     [Parameter] public string SessionId { get; set; } = string.Empty;
 
+    private bool _loading = true;
+    private bool _resuming;
+    private string? _actionError;
     private ManagedSession?  _session;
     private List<SessionEvent> _events = [];
+    private List<PendingApproval> _approvals = [];
 
-    protected override void OnInitialized()
+    protected override async Task OnParametersSetAsync()
     {
-        _session = SessionService.GetSession(SessionId);
+        _loading = true;
+        SessionService.EventFired -= OnEvent;
+        Broker.PendingChanged     -= OnPendingChanged;
+        try
+        {
+            _session = await SessionService.LoadSessionAsync(SessionId);
+        }
+        catch (Exception ex)
+        {
+            _session     = SessionService.GetSession(SessionId);
+            _actionError = $"Couldn't load the session's messages: {ex.Message}";
+        }
         if (_session is not null)
         {
-            _events = _session.SnapshotEvents();
+            _events    = _session.SnapshotEvents();
+            _approvals = [.. Broker.GetPending(SessionId)];
             SessionService.EventFired += OnEvent;
+            Broker.PendingChanged     += OnPendingChanged;
         }
+        _loading = false;
     }
 
     private void OnEvent(string sessionId, SessionEvent evt)
     {
         if (sessionId != SessionId) return;
-        InvokeAsync(() => { _events.Add(evt); StateHasChanged(); });
+        InvokeAsync(() =>
+        {
+            _session = SessionService.GetSession(SessionId) ?? _session;
+            _events.Add(evt);
+            StateHasChanged();
+        });
     }
+
+    private void OnPendingChanged() =>
+        InvokeAsync(() => { _approvals = [.. Broker.GetPending(SessionId)]; StateHasChanged(); });
 
     private void Cancel() => SessionService.CancelSession(SessionId);
 
     private async Task ResumeAsync()
     {
-        var id = await SessionService.ResumeSessionAsync(SessionId);
-        Nav.NavigateTo($"/sessions/{id}");
+        _resuming    = true;
+        _actionError = null;
+        try
+        {
+            var id = await SessionService.ResumeSessionAsync(SessionId);
+            Nav.NavigateTo($"/sessions/{id}", forceLoad: false);
+            _session = SessionService.GetSession(id);
+            _events  = _session?.SnapshotEvents() ?? [];
+        }
+        catch (Exception ex)
+        {
+            _actionError = ex.Message;
+        }
+        finally
+        {
+            _resuming = false;
+        }
     }
 
-    public void Dispose() => SessionService.EventFired -= OnEvent;
+    public void Dispose()
+    {
+        SessionService.EventFired -= OnEvent;
+        Broker.PendingChanged     -= OnPendingChanged;
+    }
 }

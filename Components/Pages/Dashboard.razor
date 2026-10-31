@@ -2,7 +2,7 @@
 @implements IDisposable
 @inject SessionHostService SessionService
 @inject HitlBroker HitlBroker
-@inject ScheduleService ScheduleService
+@inject FuseraftCli Cli
 @inject NavigationManager Nav
 
 <PageTitle>Dashboard — Fuseraft</PageTitle>
@@ -45,20 +45,24 @@
     private int _scheduledJobs;
     private IEnumerable<ManagedSession> _recent = [];
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         Refresh();
         SessionService.SessionListChanged += OnListChanged;
         HitlBroker.PendingChanged         += OnPendingChanged;
+        try
+        {
+            _scheduledJobs = (await Cli.ListAsync<WireScheduledJob>("schedule", "list", "--json")).Count;
+        }
+        catch (FuseraftCliException) { /* the count just stays 0; the Sessions page explains a missing fuseraft */ }
     }
 
     private void Refresh()
     {
         var all      = SessionService.GetSessions().ToList();
-        _activeSessions = all.Count(s => s.Status is SessionStatus.Running or SessionStatus.Starting);
+        _activeSessions = all.Count(s => s.IsLive);
         _totalSessions  = all.Count;
         _pendingHitl    = HitlBroker.GetPending().Count;
-        _scheduledJobs  = ScheduleService.GetJobs().Count;
         _recent         = all.Take(6);
     }
 
