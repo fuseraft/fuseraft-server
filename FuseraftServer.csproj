@@ -24,12 +24,4 @@
     <None Remove="tests/**" />
   </ItemGroup>
 
-  <!-- Waiting on fuseraft CLI commands they still lack (config validation and templates, agent
-       memory listing, schedule enable/disable). Kept out of the build until those exist. -->
-  <ItemGroup>
-    <Compile Remove="Services/ConfigService.cs;Services/OrchestrationTemplateService.cs;Services/MemoryService.cs;Services/ScheduleService.cs" />
-    <Content Remove="Components/Pages/Configs.razor;Components/Pages/OrchestrationBuilder.razor;Components/Pages/Memory.razor;Components/Pages/Schedule.razor;Components/Shared/ScheduleTable.razor" />
-    <None Include="Components/Pages/Configs.razor;Components/Pages/OrchestrationBuilder.razor;Components/Pages/Memory.razor;Components/Pages/Schedule.razor;Components/Shared/ScheduleTable.razor" />
-  </ItemGroup>
-
 </Project>

@@ -15,13 +15,18 @@
         <input @bind="_path" @bind:event="oninput" class="input"
                placeholder="/path/to/project or /path/to/config.yaml" />
         <button class="btn btn-sm" @onclick="TogglePicker">Browse…</button>
-        <button class="btn btn-sm btn-primary" @onclick="Search">Scan</button>
+        <button class="btn btn-sm btn-primary" @onclick="SearchAsync">Scan</button>
     </div>
     @if (_showPicker)
     {
         <DirPicker InitialPath="@_path" OnSelect="OnDirSelected" OnClose="() => _showPicker = false" />
     }
 </div>
+
+@if (_error is not null)
+{
+    <div class="error-banner">@_error</div>
+}
 
 @if (_scanning)
 {
@@ -59,23 +64,20 @@ else if (_configs is not null)
                             <td>
                                 @if (cfg.Error is not null)
                                 {
-                                    <span class="text-danger">parse error</span>
+                                    <span class="text-danger" title="@cfg.Error">doesn't load</span>
                                 }
                                 else
                                 {
                                     @cfg.Name
                                 }
                             </td>
-                            <td class="muted small">@(cfg.Error is null ? string.Join(", ", cfg.AgentNames) : "—")</td>
+                            <td class="muted small">@(cfg.Error is null ? string.Join(", ", cfg.Agents) : "—")</td>
                             <td class="muted">@cfg.SelectionType</td>
                             <td>
-                                @if (cfg.Error is null)
-                                {
-                                    <button class="btn btn-sm" @onclick:stopPropagation
-                                            @onclick="() => ValidateConfig(cfg.Path)">
-                                        Validate
-                                    </button>
-                                }
+                                <button class="btn btn-sm" @onclick:stopPropagation
+                                        @onclick="() => ValidateConfigAsync(cfg.Path)">
+                                    Validate
+                                </button>
                             </td>
                         </tr>
                     }
@@ -93,11 +95,11 @@ else if (_validation is not null)
 {
     <div class="config-validate-panel">
         <div class="config-validate-header">
-            <h2>@(_validation.Summary?.Name ?? "Validation") — @(_validation.Valid ? "✓ Valid" : "✗ Invalid")</h2>
-            <span class="muted small">@_validation.Summary?.Path</span>
+            <h2>@(_validation.Config?.Name ?? "Validation") — @(_validation.Valid ? "✓ Valid" : "✗ Invalid")</h2>
+            <span class="muted small">@_validation.Path</span>
         </div>
 
-        @if (_validation.Summary is { } s)
+        @if (_validation.Config is { } s)
         {
             <div class="config-details">
                 @if (!string.IsNullOrWhiteSpace(s.Description))
@@ -105,7 +107,7 @@ else if (_validation is not null)
                     <p class="muted">@s.Description</p>
                 }
                 <div class="config-agents">
-                    @foreach (var a in s.AgentNames)
+                    @foreach (var a in s.Agents)
                     {
                         <span class="agent-chip">@a</span>
                     }
@@ -121,11 +123,11 @@ else if (_validation is not null)
         else
         {
             <ul class="issue-list">
-                @foreach (var (level, msg) in _validation.Issues)
+                @foreach (var issue in _validation.Issues)
                 {
-                    <li class="issue-@level">
-                        <span class="issue-icon">@(level == "error" ? "✗" : "⚠")</span>
-                        @msg
+                    <li class="issue-@issue.Level">
+                        <span class="issue-icon">@(issue.Level == "error" ? "✗" : "⚠")</span>
+                        @issue.Message
                     </li>
                 }
             </ul>
@@ -156,51 +158,51 @@ else if (_validation is not null)
     public void Dispose() => WorkspaceService.Changed -= OnWorkspaceChanged;
     private bool    _scanning   = false;
     private bool    _validating = false;
+    private string? _error;
 
-    private List<ConfigSummary>?    _configs    = null;
-    private ConfigSummary?          _selected   = null;
-    private ConfigValidationResult? _validation = null;
+    private List<WireConfigSummary>? _configs    = null;
+    private WireConfigSummary?       _selected   = null;
+    private WireValidation?          _validation = null;
 
     private void TogglePicker() { _showPicker = !_showPicker; }
 
-    private void OnDirSelected(string path)
+    private async Task OnDirSelected(string path)
     {
         _path       = path;
         _showPicker = false;
         WorkspaceService.Set(path);
-        Search();
+        await SearchAsync();
     }
 
-    private void Search()
+    private async Task SearchAsync()
     {
         if (string.IsNullOrWhiteSpace(_path)) return;
         var trimmed = _path.Trim();
         WorkspaceService.Set(trimmed);
 
         _scanning   = true;
+        _error      = null;
         _validation = null;
         _selected   = null;
         StateHasChanged();
 
         try
         {
-            // If a file was typed directly, validate it immediately
             if (File.Exists(trimmed))
             {
-                _configs = [ConfigService.ListConfigs(Path.GetDirectoryName(trimmed) ?? trimmed)
-                    .FirstOrDefault(c => c.Path == trimmed)
-                    ?? new ConfigSummary(trimmed, Path.GetFileName(trimmed), string.Empty, [], "?")];
-                ValidateConfig(trimmed);
+                await ValidateConfigAsync(trimmed);
+                _configs = [_validation?.Config ?? new WireConfigSummary { Path = Path.GetFullPath(trimmed), Error = "Doesn't load." }];
+                _selected = _configs[0];
             }
             else
             {
-                _configs = ConfigService.ListConfigs(trimmed);
+                _configs = await ConfigService.ListConfigsAsync(trimmed);
             }
         }
-        catch (Exception ex)
+        catch (FuseraftCliException ex)
         {
-            _configs = [];
-            _ = ex; // scan errors surfaced per-file in ConfigService
+            _configs = null;
+            _error   = ex.Message;
         }
         finally { _scanning = false; StateHasChanged(); }
     }
@@ -211,15 +213,17 @@ else if (_validation is not null)
         StateHasChanged();
     }
 
-    private void ValidateConfig(string path)
+    private async Task ValidateConfigAsync(string path)
     {
         _validating = true;
+        _error      = null;
         StateHasChanged();
         try
         {
-            _validation = ConfigService.Validate(path);
+            _validation = await ConfigService.ValidateAsync(path);
             _selected   = _configs?.FirstOrDefault(c => c.Path == path);
         }
+        catch (FuseraftCliException ex) { _validation = null; _error = ex.Message; }
         finally { _validating = false; StateHasChanged(); }
     }
 }

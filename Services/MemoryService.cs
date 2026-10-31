@@ -1,35 +1,24 @@
-using fuseraft.Core;
-using fuseraft.Core.Models;
-using fuseraft.Infrastructure;
+using fuseraft.Server.Models;
+using fuseraft.Server.Services.Cli;
 
 namespace fuseraft.Server.Services;
 
-public sealed class MemoryService
+public sealed class MemoryService(FuseraftCli cli)
 {
-    private static string AgentsRoot =>
-        Path.Combine(FuseraftPaths.GlobalRoot, "memory", "agents");
+    public Task<List<WireMemory>> GetReplMemoriesAsync() =>
+        cli.ListAsync<WireMemory>("memory", "list", "--json");
 
-    public Task<List<MemoryEntry>> GetReplMemoriesAsync() =>
-        MemoryStore.ForRepl().LoadAllAsync();
-
-    public async Task<Dictionary<string, List<MemoryEntry>>> GetAgentMemoriesAsync()
+    public async Task<Dictionary<string, List<WireMemory>>> GetAgentMemoriesAsync()
     {
-        if (!Directory.Exists(AgentsRoot)) return [];
-
-        var result = new Dictionary<string, List<MemoryEntry>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var dir in Directory.GetDirectories(AgentsRoot).OrderBy(d => d))
-        {
-            var agentName = Path.GetFileName(dir);
-            var entries   = await MemoryStore.ForAgent(agentName).LoadAllAsync();
-            if (entries.Count > 0)
-                result[agentName] = entries;
-        }
+        var result = new Dictionary<string, List<WireMemory>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var a in await cli.ListAsync<WireMemoryAgent>("memory", "agents", "--json"))
+            result[a.Agent] = await cli.ListAsync<WireMemory>("memory", "list", "--agent", a.Agent, "--json");
         return result;
     }
 
-    public Task<bool> DeleteReplMemoryAsync(string name) =>
-        MemoryStore.ForRepl().DeleteAsync(name);
+    public Task DeleteReplMemoryAsync(string name) =>
+        cli.RunAsync("memory", "delete", name);
 
-    public Task<bool> DeleteAgentMemoryAsync(string agentName, string name) =>
-        MemoryStore.ForAgent(agentName).DeleteAsync(name);
+    public Task DeleteAgentMemoryAsync(string agentName, string name) =>
+        cli.RunAsync("memory", "delete", name, "--agent", agentName);
 }

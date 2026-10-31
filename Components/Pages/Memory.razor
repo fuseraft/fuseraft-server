@@ -8,6 +8,11 @@
     <p class="muted">Persistent facts recalled by agents and the REPL across sessions.</p>
 </div>
 
+@if (_error is not null)
+{
+    <div class="error-banner">@_error</div>
+}
+
 @if (_loading)
 {
     <p class="muted">Loading…</p>
@@ -48,10 +53,11 @@ else
 
                 @foreach (var entry in group.OrderBy(e => e.Name))
                 {
-                    var isExpanded = _expanded.Contains(entry.Guid);
-                    var isDeleting = _deleteTarget == (entry.Guid, _scope);
+                    var key        = KeyOf(entry);
+                    var isExpanded = _expanded.Contains(key);
+                    var isDeleting = _deleteTarget == (key, _scope);
                     <div class="memory-card @(isDeleting ? "memory-card-deleting" : "")">
-                        <div class="memory-card-header" @onclick="() => ToggleExpand(entry.Guid)">
+                        <div class="memory-card-header" @onclick="() => ToggleExpand(key)">
                             <div class="memory-card-title">
                                 <span class="memory-name">@entry.Name</span>
                                 <span class="memory-desc muted">@entry.Description</span>
@@ -59,11 +65,11 @@ else
                             <div class="memory-card-actions" @onclick:stopPropagation>
                                 @if (!isDeleting)
                                 {
-                                    <button class="btn btn-sm" @onclick="() => ToggleExpand(entry.Guid)">
+                                    <button class="btn btn-sm" @onclick="() => ToggleExpand(key)">
                                         @(isExpanded ? "▲" : "▼")
                                     </button>
                                     <button class="btn btn-sm btn-danger"
-                                            @onclick="() => StartDelete(entry.Guid, _scope)">Delete</button>
+                                            @onclick="() => StartDelete(key, _scope)">Delete</button>
                                 }
                                 else
                                 {
@@ -86,16 +92,20 @@ else
 }
 
 @code {
-    private bool   _loading = true;
-    private string _scope   = "repl";
+    private bool    _loading = true;
+    private string  _scope   = "repl";
+    private string? _error;
 
-    private List<MemoryEntry> ScopedEntries =>
+    // Hand-written memory files can lack a guid.
+    private static string KeyOf(WireMemory m) => string.IsNullOrEmpty(m.Guid) ? m.Name : m.Guid;
+
+    private List<WireMemory> ScopedEntries =>
         _scope == "repl"
             ? _replEntries
             : (_agentEntries.TryGetValue(_scope, out var ae) ? ae : []);
 
-    private List<MemoryEntry>                        _replEntries  = [];
-    private Dictionary<string, List<MemoryEntry>>   _agentEntries = [];
+    private List<WireMemory>                         _replEntries  = [];
+    private Dictionary<string, List<WireMemory>>    _agentEntries = [];
     private HashSet<string>                          _expanded     = [];
     private (string Guid, string Scope)?             _deleteTarget;
 
@@ -107,8 +117,12 @@ else
 
     private async Task ReloadAsync()
     {
-        _replEntries  = await MemoryService.GetReplMemoriesAsync();
-        _agentEntries = await MemoryService.GetAgentMemoriesAsync();
+        try
+        {
+            _replEntries  = await MemoryService.GetReplMemoriesAsync();
+            _agentEntries = await MemoryService.GetAgentMemoriesAsync();
+        }
+        catch (FuseraftCliException ex) { _error = ex.Message; }
 
         // If current scope no longer exists, fall back to repl
         if (_scope != "repl" && !_agentEntries.ContainsKey(_scope))
@@ -132,10 +146,15 @@ else
         var (_, scope) = _deleteTarget.Value;
         _deleteTarget = null;
 
-        if (scope == "repl")
-            await MemoryService.DeleteReplMemoryAsync(name);
-        else
-            await MemoryService.DeleteAgentMemoryAsync(scope, name);
+        _error = null;
+        try
+        {
+            if (scope == "repl")
+                await MemoryService.DeleteReplMemoryAsync(name);
+            else
+                await MemoryService.DeleteAgentMemoryAsync(scope, name);
+        }
+        catch (FuseraftCliException ex) { _error = ex.Message; }
 
         await ReloadAsync();
         StateHasChanged();
