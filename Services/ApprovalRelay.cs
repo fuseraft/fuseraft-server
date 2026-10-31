@@ -8,14 +8,14 @@ namespace fuseraft.Server.Services;
 /// The protocol has no request IDs — each <c>approval_response</c> answers the oldest open request — so
 /// answers are written in the order the requests arrived, whatever order people respond in.
 /// </summary>
-public sealed class ApprovalRelay(HitlBroker broker, TextWriter input, ApprovalSource source)
+public sealed class ApprovalRelay(HitlBroker broker, TextWriter input, ApprovalSource source, string? origin = null)
 {
     private readonly Lock _gate = new();
     private Task _last = Task.CompletedTask;
 
     public PendingApproval Handle(string sessionId, JsonElement approvalRequest)
     {
-        var request = broker.Enqueue(PendingApproval.FromEvent(sessionId, source, approvalRequest));
+        var request = broker.Enqueue(PendingApproval.FromEvent(sessionId, source, approvalRequest, origin));
         lock (_gate) _last = RespondInOrderAsync(_last, request);
         return request;
     }
