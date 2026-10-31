@@ -6,15 +6,30 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>fuseraft.Server</RootNamespace>
     <AssemblyName>fuseraft-server</AssemblyName>
-    <NoWarn>$(NoWarn);MAAI001</NoWarn>
   </PropertyGroup>
 
+  <!-- The server reaches fuseraft only by running the CLI (see Services/Cli/FuseraftCli.cs), never
+       by referencing its assemblies, so a fuseraft refactor can't break this build. -->
   <ItemGroup>
-    <ProjectReference Include="../fuseraft-cli/src/fuseraft.csproj" />
+    <PackageReference Include="Markdig" Version="1.3.2" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Markdig" Version="1.2.0" />
+    <InternalsVisibleTo Include="FuseraftServer.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="tests/**" />
+    <Content Remove="tests/**" />
+    <None Remove="tests/**" />
+  </ItemGroup>
+
+  <!-- Waiting on fuseraft CLI commands they still lack (config validation and templates, agent
+       memory listing, schedule enable/disable). Kept out of the build until those exist. -->
+  <ItemGroup>
+    <Compile Remove="Services/ConfigService.cs;Services/OrchestrationTemplateService.cs;Services/MemoryService.cs;Services/ScheduleService.cs" />
+    <Content Remove="Components/Pages/Configs.razor;Components/Pages/OrchestrationBuilder.razor;Components/Pages/Memory.razor;Components/Pages/Schedule.razor;Components/Shared/ScheduleTable.razor" />
+    <None Include="Components/Pages/Configs.razor;Components/Pages/OrchestrationBuilder.razor;Components/Pages/Memory.razor;Components/Pages/Schedule.razor;Components/Shared/ScheduleTable.razor" />
   </ItemGroup>
 
 </Project>

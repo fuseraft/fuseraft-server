@@ -1,4 +1,5 @@
-using fuseraft.Infrastructure.Plugins;
+using fuseraft.Server.Models;
+using fuseraft.Server.Services.Cli;
 
 namespace fuseraft.Server.Services;
 
@@ -9,9 +10,10 @@ public sealed record PluginEntry(
     string Description,
     IReadOnlyList<PluginFunctionEntry> Functions);
 
-public sealed class PluginCatalogService
+public sealed class PluginCatalogService(FuseraftCli cli)
 {
-    public IReadOnlyList<PluginEntry> Plugins { get; }
+    private readonly Lock _gate = new();
+    private Task<IReadOnlyList<PluginEntry>>? _plugins;
 
     // Plugin-level descriptions derived from the registry XML doc.
     private static readonly Dictionary<string, string> _descriptions = new(StringComparer.OrdinalIgnoreCase)
@@ -32,39 +34,22 @@ public sealed class PluginCatalogService
         ["SubAgent"]      = "Spawn sub-agent loops for broad codebase exploration and symbol lookup.",
     };
 
-    public PluginCatalogService(PluginRegistry registry)
+    /// <summary>Every plugin fuseraft registers; fetched once (and again after a failure), since the set only changes with a fuseraft upgrade.</summary>
+    public Task<IReadOnlyList<PluginEntry>> GetPluginsAsync()
     {
-        var entries = new List<PluginEntry>();
-
-        foreach (var name in registry.RegisteredPlugins.OrderBy(n => n))
+        lock (_gate)
         {
-            IReadOnlyList<PluginFunctionEntry> fns;
-
-            if (registry.TryGetAIFunctions(name, out var aiFns))
-            {
-                fns = aiFns
-                    .OrderBy(f => f.Name)
-                    .Select(f => new PluginFunctionEntry(f.Name, f.Description ?? string.Empty))
-                    .ToList();
-            }
-            else if (registry.TryGet(name, out var plugin))
-            {
-                fns = PluginRegistry.GetFunctionsFromObject(plugin)
-                    .Select(f => new PluginFunctionEntry(f.Name, f.Description ?? string.Empty))
-                    .ToList();
-            }
-            else
-            {
-                fns = [];
-            }
-
-            var desc = _descriptions.TryGetValue(name, out var d) ? d : string.Empty;
-            entries.Add(new PluginEntry(name, desc, fns));
+            if (_plugins is null || _plugins.IsFaulted) _plugins = LoadAsync(cli);
+            return _plugins;
         }
-
-        Plugins = entries;
     }
 
-    public PluginEntry? Get(string name) =>
-        Plugins.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+    private static async Task<IReadOnlyList<PluginEntry>> LoadAsync(FuseraftCli cli)
+    {
+        var plugins = await cli.ListAsync<WirePlugin>("plugins", "--json");
+        return [.. plugins.Select(p => new PluginEntry(
+            p.Name,
+            _descriptions.TryGetValue(p.Name, out var d) ? d : string.Empty,
+            [.. p.Functions.Select(f => new PluginFunctionEntry(f.Name, f.Description))]))];
+    }
 }

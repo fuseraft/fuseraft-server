@@ -2,16 +2,20 @@
 
 <img src="wwwroot/fuseraft-banner.png" alt="fuseraft — an agent orchestration framework">
 
-A Blazor Server web UI for [fuseraft](https://github.com/fuseraft/fuseraft-cli) — manage agent orchestration sessions, build orchestration configs visually, handle human-in-the-loop approvals, and schedule recurring runs, all from a browser.
+A Blazor Server web UI for [fuseraft](https://github.com/fuseraft/fuseraft-cli) — run and watch agent orchestration sessions, chat with the fuseraft REPL, and approve what agents want to do, all from a browser.
+
+The server doesn't link fuseraft's code. It runs the `fuseraft` CLI and speaks its versioned [wire protocol](https://github.com/fuseraft/fuseraft-cli/blob/main/docs/protocol.md): `--json` queries for lists, and JSONL event streams (`fuseraft run --bridge`, `fuseraft repl --vscode`) for live sessions. So a fuseraft upgrade can't break the server's build, and a mismatched version is reported, not misread.
 
 ---
 
 ## Features
 
 ### Sessions
-Start and monitor multi-agent orchestration sessions. Each session streams live agent events as they happen. Running sessions can be cancelled; completed sessions retain their full event history.
+Start and monitor multi-agent orchestration sessions. Each session is its own `fuseraft run --bridge` process, so several can run at once. Agent turns and tool calls stream in as they happen, and commands, file writes and agent handoffs wait for your approval. Running sessions can be cancelled, and cancelled or interrupted ones resumed. Past sessions (including ones started from the terminal) are listed with their full message history.
 
 ### Orchestration Builder
+> **Temporarily unavailable.** The Builder, Configs, Schedule and Memory pages are out of the build until the fuseraft CLI gains the commands they need (config validation and templates, schedule enable/disable, agent memory listing), so they no longer read or write fuseraft's files directly.
+
 Build and launch orchestration configs without touching YAML directly.
 
 - **Recent configs** — previously used orchestrations appear at the top of the template picker; select one and start a session immediately without re-generating anything
@@ -43,16 +47,16 @@ Define recurring orchestration runs on a cron schedule.
 ### REPL
 An interactive chat interface backed by the fuseraft CLI REPL — the same engine that powers the VS Code extension and the `fuseraft repl` terminal command.
 
-- Select any configured **Model Profile** to start a session; API keys are injected automatically from the profile store
+- Select any configured **Model Profile** and a **workspace** to start a session; API keys are injected automatically from the profile store, and the chat's tools are confined to the workspace
 - Full slash-command support (`/help`, `/clear`, `/compact`, `/plan`, `/execute`, `/system`, `/safe-mode`, and all other built-in commands) — handled natively by the CLI process, not re-implemented in the server
-- Tool use enabled by default: FileSystem, Shell, Search, Git, and Http tools are available to the model
+- Tool use enabled by default: FileSystem, Shell, Search, Git, and Http tools are available to the model, and file writes and commands ask for approval in the chat (and on the HITL page) first
 - Streaming tokens and tool-call badges update in real-time as the model responds
 - Assistant responses are rendered as Markdown (code blocks, tables, lists, etc.)
 - Sessions are persisted to `~/.fuseraft/repl-sessions/` after each turn; past sessions appear in the **Recent Sessions** table and can be resumed at any time
 - Internally the server spawns `fuseraft repl --vscode --no-banner` and speaks the same JSON-line protocol (`ready`, `token`, `tool_call`, `message_end`, `plan`, `step_status`, `session_end`, …) used by the VS Code extension
 
 ### HITL (Human-in-the-Loop)
-Agents can pause and request human input mid-run. The HITL panel shows pending prompts with a badge count in the nav, lets you respond or redirect, and unblocks the waiting agent automatically.
+Every approval a session or REPL chat is waiting on, in one place, with a badge count in the nav. Shell commands show the command, file writes show a diff, and agent handoffs show who hands off to whom. Approve or deny, and the waiting process carries on. The same cards also appear on the session's page and in the REPL chat.
 
 ---
 
@@ -80,7 +84,7 @@ See `../vsl/` (task.md, pyproject.toml, vsl/ package) for source and full spec. 
 ## Requirements
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
-- `fuseraft-cli` (included as a project reference via `../fuseraft-cli/src/fuseraft.csproj`)
+- The `fuseraft` CLI, speaking wire protocol version 1 (it has `fuseraft run --bridge`). It's found on `PATH`; set `Fuseraft:Binary` in `appsettings.json` (or the `Fuseraft__Binary` environment variable) to use another one.
 - Linux: `secret-tool` (from `libsecret-tools`) for keychain storage, or keys fall back to plain-text
 
 ---
@@ -89,6 +93,12 @@ See `../vsl/` (task.md, pyproject.toml, vsl/ package) for source and full spec. 
 
 ```bash
 dotnet run --project fuseraft-server/FuseraftServer.csproj
+```
+
+Tests:
+
+```bash
+dotnet test fuseraft-server/tests/FuseraftServer.Tests
 ```
 
 Then open [http://localhost:5000](http://localhost:5000).

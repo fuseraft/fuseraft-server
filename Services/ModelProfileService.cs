@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
-using fuseraft.Core;
 using fuseraft.Server.Models;
 
 namespace fuseraft.Server.Services;
@@ -22,7 +21,7 @@ public sealed class ModelProfileService
     };
 
     private static string ProfilesFilePath =>
-        Path.Combine(FuseraftPaths.GlobalRoot, "model-profiles.json");
+        Path.Combine(FuseraftHome.Root, "model-profiles.json");
 
     private readonly List<ModelProfile> _profiles = [];
     private readonly SemaphoreSlim      _lock     = new(1, 1);
@@ -296,7 +295,7 @@ public sealed class ModelProfileService
     // ── Plain-text fallback (~/.fuseraft/profile-keys/{id}, mode 600) ────────────
 
     private static string PlainTextDir =>
-        Path.Combine(FuseraftPaths.GlobalRoot, "profile-keys");
+        Path.Combine(FuseraftHome.Root, "profile-keys");
 
     private static string PlainTextPath(string profileId) =>
         Path.Combine(PlainTextDir, profileId);

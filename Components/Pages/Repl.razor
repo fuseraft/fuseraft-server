@@ -2,6 +2,8 @@
 @implements IDisposable
 @inject ReplService ReplService
 @inject ModelProfileService ProfileService
+@inject HitlBroker Broker
+@inject WorkspaceService WorkspaceService
 
 <PageTitle>REPL — Fuseraft</PageTitle>
 
@@ -12,6 +14,11 @@
         <button class="btn" @onclick="CloseSession">← New Session</button>
     }
 </div>
+
+@if (_pageError is not null)
+{
+    <div class="error-banner">@_pageError</div>
+}
 
 @if (_activeSessionId is null)
 {
@@ -34,6 +41,11 @@
                         <option value="@p.Id">@p.Name — @p.ModelId</option>
                     }
                 </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Workspace</label>
+                <input class="input" @bind="_workspace" placeholder="/home/user/myproject" />
+                <p class="form-hint">The chat's files and commands are confined to this directory, and it asks before writing or running anything.</p>
             </div>
             <div class="form-group">
                 <label class="form-label">System Prompt <span class="muted small">(optional)</span></label>
@@ -59,6 +71,7 @@
                         <thead>
                             <tr>
                                 <th>Session</th>
+                                <th>Chat</th>
                                 <th>Model</th>
                                 <th>Turns</th>
                                 <th>Last Active</th>
@@ -70,9 +83,10 @@
                             {
                                 <tr>
                                     <td class="mono small">@snap.SessionId</td>
+                                    <td class="small" title="@snap.Cwd">@Truncate(snap.DisplayName, 60)</td>
                                     <td class="small muted">@snap.ModelId</td>
                                     <td class="small muted">@snap.TurnIndex</td>
-                                    <td class="small muted">@snap.LastUpdatedAt.ToString("MMM d, HH:mm")</td>
+                                    <td class="small muted">@snap.LastUpdatedAt.ToLocalTime().ToString("MMM d, HH:mm")</td>
                                     <td>
                                         <button class="btn btn-sm"
                                                 @onclick="() => ResumeSnapshotAsync(snap.SessionId)">
@@ -153,6 +167,11 @@ else
                 </div>
             }
 
+            @foreach (var req in Broker.GetPending(session.SessionId).Where(r => r.Source == ApprovalSource.Repl))
+            {
+                <ApprovalCard @key="req.Id" Request="req" ShowSource="false" />
+            }
+
             @if (session.Status == ReplStatus.Thinking)
             {
                 <div class="repl-msg repl-msg-assistant repl-streaming">
@@ -200,7 +219,9 @@ else
 
 @code {
     private IReadOnlyList<ModelProfile>         _profiles  = [];
-    private IReadOnlyList<ReplSessionSnapshot>  _snapshots = [];
+    private IReadOnlyList<WireReplSession>      _snapshots = [];
+    private string? _pageError;
+    private string  _workspace       = "";
     private string? _activeSessionId;
     private string  _input           = "";
     private string  _selectedProfileId = "";
@@ -210,7 +231,8 @@ else
     protected override async Task OnInitializedAsync()
     {
         _profiles  = await ProfileService.ListAsync();
-        _snapshots = await ReplService.ListSnapshotsAsync();
+        _workspace = WorkspaceService.Current;
+        await RefreshSnapshotsAsync();
 
         if (_profiles.Count > 0)
             _selectedProfileId = _profiles[0].Id;
@@ -219,7 +241,23 @@ else
         _activeSessionId = ReplService.GetSessions().FirstOrDefault()?.Key;
 
         ReplService.SessionChanged += OnSessionChanged;
+        Broker.PendingChanged      += OnPendingChanged;
     }
+
+    private async Task RefreshSnapshotsAsync()
+    {
+        try
+        {
+            _snapshots = await ReplService.ListSnapshotsAsync();
+        }
+        catch (FuseraftCliException ex)
+        {
+            _snapshots = [];
+            _pageError = $"Couldn't list past chats: {ex.Message}";
+        }
+    }
+
+    private void OnPendingChanged() => InvokeAsync(StateHasChanged);
 
     private void OnSessionChanged(string sessionId)
     {
@@ -230,7 +268,7 @@ else
             if (ReplService.GetSession(sessionId) is null)
             {
                 _activeSessionId = null;
-                _snapshots = await ReplService.ListSnapshotsAsync();
+                await RefreshSnapshotsAsync();
             }
             StateHasChanged();
         });
@@ -239,17 +277,20 @@ else
     private async Task StartSessionAsync()
     {
         if (string.IsNullOrWhiteSpace(_selectedProfileId)) return;
-        _starting = true;
+        _starting  = true;
+        _pageError = null;
         StateHasChanged();
         try
         {
-            _activeSessionId = await ReplService.CreateSessionAsync(_selectedProfileId, _systemPrompt);
+            if (!string.IsNullOrWhiteSpace(_workspace) && !Directory.Exists(_workspace.Trim()))
+                throw new DirectoryNotFoundException($"Workspace not found: {_workspace.Trim()}");
+            WorkspaceService.Set(_workspace);
+            _activeSessionId = await ReplService.CreateSessionAsync(_selectedProfileId, _systemPrompt, _workspace);
         }
         catch (Exception ex)
         {
-            // Surface the error briefly via the error-banner pattern
             _activeSessionId = null;
-            _ = ex;
+            _pageError       = ex.Message;
         }
         finally
         {
@@ -259,12 +300,16 @@ else
 
     private async Task ResumeSnapshotAsync(string snapshotId)
     {
+        _pageError = null;
         try
         {
             _activeSessionId = await ReplService.ResumeSnapshotAsync(snapshotId);
-            _snapshots = await ReplService.ListSnapshotsAsync();
+            await RefreshSnapshotsAsync();
         }
-        catch { }
+        catch (Exception ex)
+        {
+            _pageError = ex.Message;
+        }
     }
 
     private void Send()
@@ -293,5 +338,12 @@ else
             Send();
     }
 
-    public void Dispose() => ReplService.SessionChanged -= OnSessionChanged;
+    private static string Truncate(string s, int max) =>
+        s.ReplaceLineEndings(" ") is var flat && flat.Length <= max ? flat : flat[..max] + "…";
+
+    public void Dispose()
+    {
+        ReplService.SessionChanged -= OnSessionChanged;
+        Broker.PendingChanged      -= OnPendingChanged;
+    }
 }

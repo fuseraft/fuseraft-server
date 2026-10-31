@@ -2,7 +2,7 @@
 
 <div class="live-feed">
     @{
-        // Only show agent_starting when it's the last event (agent still thinking)
+        // Only show agent_starting/tool_calling when it's the last event (agent still working)
         var lastIdx = Events.Count - 1;
         for (var i = 0; i <= lastIdx; i++)
         {
@@ -17,6 +17,13 @@
                     <div class="thinking-row">
                         <div class="spin"></div>
                         <span class="muted">@evt.AgentName thinking…</span>
+                    </div>
+                    break;
+
+                case "tool_calling" when i == lastIdx:
+                    <div class="thinking-row">
+                        <div class="spin"></div>
+                        <span class="muted">@evt.AgentName → <code>@evt.Detail</code></span>
                     </div>
                     break;
 

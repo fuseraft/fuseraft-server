@@ -6,9 +6,14 @@
 <div class="page-header">
     <h1>Plugins</h1>
     <span class="plugin-totals">
-        @Catalog.Plugins.Count plugins · @Catalog.Plugins.Sum(p => p.Functions.Count) functions
+        @_plugins.Count plugins · @_plugins.Sum(p => p.Functions.Count) functions
     </span>
 </div>
+
+@if (_loadError is not null)
+{
+    <div class="error-banner">Couldn't list plugins from fuseraft: @_loadError</div>
+}
 
 <div class="plugin-search-bar">
     <input class="input" placeholder="Filter plugins or functions…" @bind="_query" @bind:event="oninput" />
@@ -47,15 +52,29 @@
 @code {
     private string _query   = string.Empty;
     private readonly HashSet<string> _expanded = [];
+    private IReadOnlyList<PluginEntry> _plugins = [];
+    private string? _loadError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _plugins = await Catalog.GetPluginsAsync();
+        }
+        catch (FuseraftCliException ex)
+        {
+            _loadError = ex.Message;
+        }
+    }
 
     private IEnumerable<PluginEntry> Filtered
     {
         get
         {
             var q = _query.Trim();
-            if (string.IsNullOrEmpty(q)) return Catalog.Plugins;
+            if (string.IsNullOrEmpty(q)) return _plugins;
 
-            return Catalog.Plugins
+            return _plugins
                 .Where(p =>
                     p.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                     p.Description.Contains(q, StringComparison.OrdinalIgnoreCase) ||

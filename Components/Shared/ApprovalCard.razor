@@ -1,0 +1,91 @@
+@inject HitlBroker Broker
+
+<div class="hitl-card">
+    <div class="hitl-card-header">
+        <span class="hitl-type-badge hitl-kind">@KindLabel</span>
+        @if (ShowSource)
+        {
+            @if (Request.Source == ApprovalSource.Session)
+            {
+                <a href="/sessions/@Request.SessionId" class="hitl-session-link">@Request.SessionId</a>
+            }
+            else
+            {
+                <a href="/repl" class="hitl-session-link">REPL · @Request.SessionId</a>
+            }
+        }
+        <span class="muted hitl-age">@FormatAge(Request.Created)</span>
+    </div>
+
+    <div class="hitl-prompt">
+        @switch (Request.Kind)
+        {
+            case "shell_command":
+                <div>Run this command?</div>
+                <pre class="hitl-code">@Request.Command</pre>
+                break;
+            case "file_write":
+                <div>@(Request.Action ?? "write_file") <code>@Request.Path</code></div>
+                <div class="hitl-diff">
+                    @foreach (var line in LineDiff.Compute(Request.OldContent, Request.NewContent))
+                    {
+                        <div class="diff-line diff-@line.Kind.ToString().ToLowerInvariant()">@Prefix(line.Kind)@line.Text</div>
+                    }
+                </div>
+                break;
+            case "tool_action":
+                <div><code>@Request.Plugin.@Request.Action</code></div>
+                @if (!string.IsNullOrWhiteSpace(Request.Detail))
+                {
+                    <pre class="hitl-code">@Request.Detail</pre>
+                }
+                break;
+            case "route_approval":
+                <div>Hand off from <strong>@Request.SourceAgent</strong> to <strong>@Request.TargetAgent</strong>?</div>
+                <div class="muted small">Triggered by <code>@Request.Keyword</code></div>
+                break;
+            default:
+                <div>fuseraft is asking for approval of something this server doesn't recognize:</div>
+                <pre class="hitl-code">@Request.RawJson</pre>
+                break;
+        }
+    </div>
+
+    <div class="hitl-response-area">
+        <div class="hitl-actions">
+            <button class="btn btn-primary" @onclick="() => Broker.Respond(Request.Id, true)">✓ Approve</button>
+            <button class="btn btn-danger" @onclick="() => Broker.Respond(Request.Id, false)">✕ Deny</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public PendingApproval Request { get; set; } = default!;
+    /// <summary>Whether to link the session the request came from (off when the card is already on that session's page).</summary>
+    [Parameter] public bool ShowSource { get; set; } = true;
+
+    private string KindLabel => Request.Kind switch
+    {
+        "shell_command"  => "Shell",
+        "file_write"     => "File write",
+        "tool_action"    => "Tool",
+        "route_approval" => "Handoff",
+        _                => Request.Kind,
+    };
+
+    private static string Prefix(DiffKind kind) => kind switch
+    {
+        DiffKind.Added   => "+ ",
+        DiffKind.Removed => "- ",
+        DiffKind.Skipped => "⋯ ",
+        _                => "  ",
+    };
+
+    private static string FormatAge(DateTimeOffset created)
+    {
+        var age = DateTimeOffset.UtcNow - created;
+        return age.TotalMinutes < 1 ? "just now"
+             : age.TotalHours   < 1 ? $"{(int)age.TotalMinutes}m ago"
+             :                        $"{(int)age.TotalHours}h ago";
+    }
+}

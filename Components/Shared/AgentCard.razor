@@ -1,6 +1,4 @@
-@using fuseraft.Core.Models
-
-<div class="agent-card @(IsUser ? "user-card" : "")">
+<div class="agent-card @(IsUser ? "user-card" : "") @(Message.IsOrchestratorCorrection ? "orchestrator-card" : "")">
     <div class="card-header">
         <span class="agent-pill"
               style="background: @ColorHex22; color: @ColorHex;">
@@ -12,9 +10,9 @@
             {
                 <span class="card-stat">@FormatMs(Elapsed.Value)</span>
             }
-            @if (Message.Usage is { } u)
+            @if (Message.InputTokens is { } input && Message.OutputTokens is { } output)
             {
-                <span class="card-stat muted">in:@u.InputTokens.ToString("N0") out:@u.OutputTokens.ToString("N0")</span>
+                <span class="card-stat muted">in:@input.ToString("N0") out:@output.ToString("N0")</span>
             }
         </div>
     </div>
@@ -22,7 +20,7 @@
     {
         <div class="card-body">@((MarkupString)Rendered)</div>
     }
-    @if (Message.ToolCalls is { Count: > 0 })
+    @if (Message.ToolCalls.Count > 0)
     {
         <div class="card-tool-calls">
             @foreach (var tc in Message.ToolCalls)
@@ -37,14 +35,14 @@
             }
         </div>
     }
-    @if (string.IsNullOrWhiteSpace(Message.Content) && (Message.ToolCalls is null || Message.ToolCalls.Count == 0))
+    @if (string.IsNullOrWhiteSpace(Message.Content) && Message.ToolCalls.Count == 0)
     {
         <div class="card-body muted">(no content)</div>
     }
 </div>
 
 @code {
-    [Parameter, EditorRequired] public AgentMessage Message { get; set; } = default!;
+    [Parameter, EditorRequired] public WireAgentMessage Message { get; set; } = default!;
     [Parameter]                 public TimeSpan?    Elapsed { get; set; }
 
     private bool IsUser => Message.Role == "user";

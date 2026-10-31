@@ -37,7 +37,7 @@
     {
         <div class="error-banner">@_loadError</div>
     }
-    else if (_index is null || _index.Items.Count == 0)
+    else if (_index is null || _index.Count == 0)
     {
         <div class="empty-state">
             <div class="empty-icon">📂</div>
@@ -60,15 +60,14 @@
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var entry in _index.Items.OrderBy(x => x.Key))
+                    @foreach (var item in _index)
                     {
-                        var item = entry.Value;
-                        var totalBytes = item.Files.Sum(f => f.SizeBytes);
+                        var totalBytes = item.SizeBytes;
                         <tr>
                             <td><span class="mono">@item.Name</span></td>
                             <td class="muted">@item.Files.Count</td>
                             <td class="muted nowrap">@FormatSize(totalBytes)</td>
-                            <td class="muted nowrap">@item.ImportedAt.ToString("yyyy-MM-dd")</td>
+                            <td class="muted nowrap">@item.ImportedAt.ToLocalTime().ToString("yyyy-MM-dd")</td>
                             <td class="muted">@(item.Description ?? "—")</td>
                             <td>
                                 <button class="btn btn-sm btn-danger"
@@ -154,7 +153,7 @@
     private bool    _loading    = false;
     private string? _loadError;
 
-    private fuseraft.Infrastructure.ContextIndex? _index;
+    private List<WireContextItem>? _index;
 
     private bool    _showAdd      = false;
     private bool    _adding       = false;
@@ -184,7 +183,7 @@
         StateHasChanged();
         try
         {
-            _index = await ContextService.GetIndexAsync(_workspace.Trim());
+            _index = await ContextService.ListAsync(_workspace.Trim());
         }
         catch (Exception ex)
         {

@@ -1,8 +1,7 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Text.Json;
-using fuseraft.Core.Models;
 using fuseraft.Server.Models;
+using fuseraft.Server.Services.Cli;
 
 namespace fuseraft.Server.Services;
 
@@ -18,6 +17,8 @@ public sealed class ActiveReplSession : IDisposable
     public string        SessionId { get; set; }  = "";
     public string        ProfileId { get; init; } = "";
     public string        ModelId   { get; set; }  = "";
+    /// <summary>The directory the chat runs in; its tools are sandboxed to it.</summary>
+    public string?       Cwd       { get; init; }
     public DateTimeOffset StartedAt { get; init; } = DateTimeOffset.UtcNow;
 
     public ReplStatus Status         { get; set; } = ReplStatus.Idle;
@@ -27,23 +28,27 @@ public sealed class ActiveReplSession : IDisposable
 
     public List<ReplMessage> Messages { get; } = [];
 
-    internal Process? Proc { get; set; }
+    internal IBridgeProcess? Bridge { get; set; }
+    internal ApprovalRelay?  Relay  { get; set; }
 
     public void Dispose()
     {
-        try { Proc?.Kill(entireProcessTree: true); } catch { }
-        Proc?.Dispose();
+        Bridge?.Kill();
+        Bridge?.Dispose();
     }
 }
 
 /// <summary>
 /// Manages fuseraft REPL sessions by spawning <c>fuseraft repl --vscode</c> as a child
-/// process and speaking the same JSON-line protocol used by the VS Code extension.
+/// process and speaking the same JSON-line protocol used by the VS Code extension. The REPL
+/// asks before writing files or running commands; those requests go to the <see cref="HitlBroker"/>.
 /// </summary>
 public sealed class ReplService : IDisposable
 {
     private readonly ConcurrentDictionary<string, ActiveReplSession> _sessions = new();
     private readonly ModelProfileService _profiles;
+    private readonly FuseraftCli _cli;
+    private readonly HitlBroker  _hitl;
 
     private static readonly JsonSerializerOptions _jsonOpts = new()
     {
@@ -52,11 +57,16 @@ public sealed class ReplService : IDisposable
 
     public event Action<string>? SessionChanged;
 
-    public ReplService(ModelProfileService profiles) => _profiles = profiles;
+    public ReplService(ModelProfileService profiles, FuseraftCli cli, HitlBroker hitl)
+    {
+        _profiles = profiles;
+        _cli      = cli;
+        _hitl     = hitl;
+    }
 
     // ── Session creation ─────────────────────────────────────────────────────
 
-    public async Task<string> CreateSessionAsync(string profileId, string systemPrompt)
+    public async Task<string> CreateSessionAsync(string profileId, string systemPrompt, string? workspaceDir = null)
     {
         var profile = await GetProfileAsync(profileId);
         var key     = NewKey();
@@ -66,6 +76,7 @@ public sealed class ReplService : IDisposable
             SessionId = key,
             ProfileId = profile.Id,
             ModelId   = profile.ModelId,
+            Cwd       = string.IsNullOrWhiteSpace(workspaceDir) ? null : workspaceDir.Trim(),
         };
         _sessions[key] = session;
 
@@ -79,7 +90,7 @@ public sealed class ReplService : IDisposable
 
     public async Task<string> ResumeSnapshotAsync(string snapshotSessionId)
     {
-        var snapshot = await ReplSessionSnapshot.LoadAsync(snapshotSessionId)
+        var snapshot = (await ListSnapshotsAsync()).FirstOrDefault(s => s.SessionId == snapshotSessionId)
             ?? throw new InvalidOperationException($"Snapshot '{snapshotSessionId}' not found.");
 
         var profiles = await _profiles.ListAsync();
@@ -94,6 +105,8 @@ public sealed class ReplService : IDisposable
             SessionId = snapshotSessionId,
             ProfileId = profile.Id,
             ModelId   = snapshot.ModelId,
+            // A chat resumes in the directory it ran in, so its sandbox and paths still line up.
+            Cwd       = Directory.Exists(snapshot.Cwd) ? snapshot.Cwd : null,
         };
         _sessions[key] = session;
 
@@ -109,26 +122,19 @@ public sealed class ReplService : IDisposable
 
     private void Spawn(string key, ActiveReplSession session, ModelProfile profile, List<string> args)
     {
-        var psi = new ProcessStartInfo("fuseraft")
-        {
-            RedirectStandardInput  = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError  = true,
-            UseShellExecute        = false,
-        };
-        foreach (var arg in args) psi.ArgumentList.Add(arg);
-
         // Inject the profile's API key as FUSERAFT_API_KEY — same channel the VS Code
         // extension uses so the CLI picks it up in --vscode mode.
+        var env    = new Dictionary<string, string>();
         var apiKey = Environment.GetEnvironmentVariable(profile.ApiKeyEnvVar) ?? "";
         if (!string.IsNullOrEmpty(apiKey))
-            psi.Environment["FUSERAFT_API_KEY"] = apiKey;
+            env["FUSERAFT_API_KEY"] = apiKey;
 
         try
         {
-            var proc = Process.Start(psi)!;
-            session.Proc = proc;
-            _ = Task.Run(() => ReadLoopAsync(key, proc));
+            var bridge = _cli.StartBridge(args, session.Cwd, env);
+            session.Bridge = bridge;
+            session.Relay  = new ApprovalRelay(_hitl, bridge.Input, ApprovalSource.Repl);
+            _ = Task.Run(() => ReadLoopAsync(key, bridge));
         }
         catch (Exception ex)
         {
@@ -140,11 +146,11 @@ public sealed class ReplService : IDisposable
 
     // ── Stdout reader ────────────────────────────────────────────────────────
 
-    private async Task ReadLoopAsync(string key, Process proc)
+    private async Task ReadLoopAsync(string key, IBridgeProcess bridge)
     {
         try
         {
-            while (await proc.StandardOutput.ReadLineAsync() is { } raw)
+            while (await bridge.Output.ReadLineAsync() is { } raw)
             {
                 var line = raw.Trim();
                 if (string.IsNullOrEmpty(line)) continue;
@@ -161,14 +167,17 @@ public sealed class ReplService : IDisposable
         catch { /* pipe closed */ }
         finally
         {
-            // Process exited without a clean session_end — tidy up state.
-            if (_sessions.TryGetValue(key, out var s) && s.Status == ReplStatus.Thinking)
+            if (_sessions.TryGetValue(key, out var s))
             {
-                s.Status        = ReplStatus.Idle;
-                s.StreamingText = null;
+                // Still listed means no session_end arrived: the process died. Keep the chat on
+                // screen with the reason instead of silently dropping back to the start form.
+                _hitl.CancelSession(s.SessionId);
+                var exit = await bridge.WaitForExitAsync();
+                s.Status         = ReplStatus.Error;
+                s.Error          = $"fuseraft exited unexpectedly (exit {exit}). {bridge.StderrTail.Split('\n').LastOrDefault()}".Trim();
+                s.StreamingText  = null;
                 s.StreamingTools = null;
             }
-            _sessions.TryRemove(key, out _);
             SessionChanged?.Invoke(key);
         }
     }
@@ -182,9 +191,31 @@ public sealed class ReplService : IDisposable
         switch (type)
         {
             case "ready":
+                try
+                {
+                    FuseraftCli.CheckVersion(root);
+                }
+                catch (FuseraftCliException ex)
+                {
+                    s.Status = ReplStatus.Error;
+                    s.Error  = ex.Message;
+                    s.Bridge?.Kill();
+                    break;
+                }
                 s.SessionId = Str(root, "sessionId") ?? s.SessionId;
                 s.ModelId   = Str(root, "model")     ?? s.ModelId;
                 s.Status    = ReplStatus.Idle;
+                break;
+
+            case "approval_request":
+                s.Relay?.Handle(s.SessionId, root);
+                break;
+
+            case "text":
+            case "info":
+                // Slash-command output, pre-rendered as Markdown.
+                if (Str(root, "text") is { Length: > 0 } output)
+                    s.Messages.Add(new ReplMessage("system", output, [], DateTimeOffset.UtcNow));
                 break;
 
             case "token":
@@ -306,11 +337,12 @@ public sealed class ReplService : IDisposable
         WriteStdinRaw(s, "/clear");
     }
 
+    /// <summary>Stops the reply in progress; the chat stays open.</summary>
     public void CancelSession(string key)
     {
-        if (!_sessions.TryGetValue(key, out var s)) return;
-        // Graceful: ask the CLI to exit (it saves the snapshot first)
-        WriteStdinRaw(s, "/exit");
+        if (!_sessions.TryGetValue(key, out var s) || s.Relay is not { } relay) return;
+        _hitl.CancelSession(s.SessionId);
+        _ = relay.InterruptAsync();
     }
 
     public void CloseSession(string key)
@@ -329,22 +361,22 @@ public sealed class ReplService : IDisposable
     public IEnumerable<ActiveReplSession> GetSessions() =>
         _sessions.Values.OrderByDescending(s => s.StartedAt);
 
-    public Task<IReadOnlyList<ReplSessionSnapshot>> ListSnapshotsAsync() =>
-        ReplSessionSnapshot.ListAsync();
+    public Task<List<WireReplSession>> ListSnapshotsAsync() =>
+        _cli.ListAsync<WireReplSession>("sessions", "--repl", "--json");
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private void WriteStdin(ActiveReplSession s, string text)
     {
         var json = JsonSerializer.Serialize(new { type = "user_input", text }, _jsonOpts);
-        try { s.Proc?.StandardInput.WriteLine(json); } catch { }
+        try { s.Bridge?.Input.WriteLine(json); } catch { }
     }
 
     private void WriteStdinRaw(ActiveReplSession s, string text)
     {
         // Non-JSON path: the CLI's ReadInput falls back to the raw string when
         // the line cannot be parsed as JSON.
-        try { s.Proc?.StandardInput.WriteLine(text); } catch { }
+        try { s.Bridge?.Input.WriteLine(text); } catch { }
     }
 
     private async Task<ModelProfile> GetProfileAsync(string profileId)
