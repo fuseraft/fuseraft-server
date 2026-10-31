@@ -39,6 +39,8 @@ Attach reference documents to a workspace. Imported files are indexed in `.fuser
 List and validate orchestration configs with `fuseraft validate`, so the checks are the CLI's own. The panel shows agent names, selection type, and every issue found.
 
 ### Daemons
+<img src="docs/screenshots/daemons.png" alt="The Daemons page: a connected daemon asking to run npm test, with Approve and Deny buttons">
+
 Attach to a running `fuseraft serve`, on this machine or another, over its attach WebSocket. Send it tasks, see your tasks' results, follow every task's live progress (including tasks other clients and the daemon itself started), and answer approvals for the tasks you sent, here or on the HITL page. A connection runs one of your tasks at a time, as `fuseraft attach` does.
 
 Add daemons on the page (kept until the server stops), or list them in `appsettings.json`:
