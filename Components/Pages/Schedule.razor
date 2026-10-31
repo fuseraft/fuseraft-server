@@ -37,6 +37,10 @@
                 <input @bind="_addConfig" class="input" placeholder=".fuseraft/config/orchestration.yaml" />
             </div>
             <div class="form-group">
+                <label class="form-label">Working Directory <span class="form-optional">(optional)</span></label>
+                <input @bind="_addWorkDir" class="input" placeholder="/path/to/project" />
+            </div>
+            <div class="form-group">
                 <label class="form-label">Description <span class="form-optional">(optional)</span></label>
                 <input @bind="_addDesc" class="input" placeholder="Short description…" />
             </div>
@@ -54,9 +58,9 @@
     </div>
 }
 
-@if (_runError is not null)
+@if (_error is not null)
 {
-    <div class="error-banner">@_runError</div>
+    <div class="error-banner">@_error</div>
 }
 
 <ScheduleTable Jobs="@_jobs"
@@ -65,7 +69,7 @@
                OnRun="@RunJob" />
 
 @code {
-    private List<ScheduledJob> _jobs = [];
+    private List<WireScheduledJob> _jobs = [];
     private bool   _showAdd = false;
     private bool   _adding  = false;
     private string _addName = string.Empty;
@@ -73,12 +77,17 @@
     private string _addTask = string.Empty;
     private string _addConfig = string.Empty;
     private string _addDesc = string.Empty;
+    private string _addWorkDir = string.Empty;
     private string? _addError;
-    private string? _runError;
+    private string? _error;
 
-    protected override void OnInitialized() => LoadJobs();
+    protected override Task OnInitializedAsync() => LoadJobsAsync();
 
-    private void LoadJobs() => _jobs = [..ScheduleService.GetJobs()];
+    private async Task LoadJobsAsync()
+    {
+        try { _jobs = await ScheduleService.GetJobsAsync(); }
+        catch (FuseraftCliException ex) { _error = ex.Message; }
+    }
 
     private void CloseAdd()
     {
@@ -98,40 +107,35 @@
 
         try
         {
-            await ScheduleService.AddJobAsync(
-                _addName, _addCron, _addTask,
-                string.IsNullOrWhiteSpace(_addConfig) ? null : _addConfig,
-                string.IsNullOrWhiteSpace(_addDesc)   ? null : _addDesc);
+            await ScheduleService.AddJobAsync(_addName, _addCron, _addTask, _addConfig, _addDesc, _addWorkDir);
             _showAdd = false;
-            (_addName, _addCron, _addTask, _addConfig, _addDesc) = (string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
-            LoadJobs();
+            (_addName, _addCron, _addTask, _addConfig, _addDesc, _addWorkDir) = ("", "", "", "", "", "");
+            await LoadJobsAsync();
         }
         catch (Exception ex) { _addError = ex.Message; }
         finally { _adding = false; }
     }
 
-    private void RemoveJob(string name)
+    private void RemoveJob(string name) => _ = InvokeAsync(() => ChangeAsync(() => ScheduleService.RemoveJobAsync(name)));
+
+    private void HandleToggle((string Name, bool Enabled) args) =>
+        _ = InvokeAsync(() => ChangeAsync(() => ScheduleService.SetEnabledAsync(args.Name, args.Enabled)));
+
+    private async Task ChangeAsync(Func<Task> change)
     {
-        ScheduleService.RemoveJob(name);
-        LoadJobs();
+        _error = null;
+        try { await change(); }
+        catch (FuseraftCliException ex) { _error = ex.Message; }
+        await LoadJobsAsync();
         StateHasChanged();
     }
 
-    private void HandleToggle((string Name, bool Enabled) args) => _ = ToggleAsync(args);
+    private void RunJob(string name) => _ = InvokeAsync(() => RunJobAsync(name));
 
-    private async Task ToggleAsync((string Name, bool Enabled) args)
-    {
-        try { await ScheduleService.ToggleJobAsync(args.Name, args.Enabled); }
-        catch { /* best-effort */ }
-        LoadJobs();
-        StateHasChanged();
-    }
-
-    private void RunJob(string name) => _ = RunJobAsync(name);
-
+    // Runs attended, with approvals, unlike 'fuseraft schedule run'; the job's LastRun/NextRun stay as they are.
     private async Task RunJobAsync(string name)
     {
-        _runError = null;
+        _error = null;
         var job = _jobs.FirstOrDefault(j => j.Name == name);
         if (job is null) return;
 
@@ -141,14 +145,11 @@
                 job.Task,
                 job.Config ?? ".fuseraft/config/orchestration.yaml",
                 job.WorkDir ?? string.Empty);
-
-            await ScheduleService.UpdateJobRunAsync(name);
-            LoadJobs();
             Nav.NavigateTo($"/sessions/{sessionId}");
         }
         catch (Exception ex)
         {
-            _runError = $"Failed to run '{name}': {ex.Message}";
+            _error = $"Failed to run '{name}': {ex.Message}";
             StateHasChanged();
         }
     }

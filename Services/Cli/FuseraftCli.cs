@@ -48,6 +48,13 @@ public class FuseraftCli(IOptions<FuseraftCliOptions> options)
         return ParseItem<T>(doc);
     }
 
+    /// <summary>Like <see cref="ItemAsync{T}"/>, for commands that act on their working directory.</summary>
+    public async Task<T> ItemInAsync<T>(string workingDirectory, params string[] args)
+    {
+        using var doc = await QueryAsync(args, workingDirectory);
+        return ParseItem<T>(doc);
+    }
+
     /// <summary>Runs a command for its effect; a non-zero exit throws with what it printed.</summary>
     public virtual async Task RunAsync(params string[] args)
     {
@@ -71,9 +78,9 @@ public class FuseraftCli(IOptions<FuseraftCliOptions> options)
         }
     }
 
-    protected virtual async Task<JsonDocument> QueryAsync(string[] args)
+    protected virtual async Task<JsonDocument> QueryAsync(string[] args, string? workingDirectory = null)
     {
-        var (exit, stdout, stderr) = await ExecAsync(args);
+        var (exit, stdout, stderr) = await ExecAsync(args, workingDirectory);
         var line = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault();
         if (line is null)
             throw new FuseraftCliException(FirstNonEmpty(stderr) ?? $"fuseraft {string.Join(' ', args)} printed nothing (exit {exit}).");
@@ -133,9 +140,9 @@ public class FuseraftCli(IOptions<FuseraftCliOptions> options)
         return psi;
     }
 
-    private async Task<(int Exit, string Stdout, string Stderr)> ExecAsync(string[] args)
+    private async Task<(int Exit, string Stdout, string Stderr)> ExecAsync(string[] args, string? workingDirectory = null)
     {
-        var psi = StartInfo(args, null);
+        var psi = StartInfo(args, workingDirectory);
         psi.RedirectStandardInput = false;
         Process proc;
         try

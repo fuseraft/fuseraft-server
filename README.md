@@ -14,15 +14,12 @@ The server doesn't link fuseraft's code. It runs the `fuseraft` CLI and speaks i
 Start and monitor multi-agent orchestration sessions. Each session is its own `fuseraft run --bridge` process, so several can run at once. Agent turns and tool calls stream in as they happen, and commands, file writes and agent handoffs wait for your approval. Running sessions can be cancelled, and cancelled or interrupted ones resumed. Past sessions (including ones started from the terminal) are listed with their full message history.
 
 ### Orchestration Builder
-> **Temporarily unavailable.** The Builder, Configs, Schedule and Memory pages are out of the build until the fuseraft CLI gains the commands they need (config validation and templates, schedule enable/disable, agent memory listing), so they no longer read or write fuseraft's files directly.
+Generate an orchestration config from one of `fuseraft init`'s team templates and launch it.
 
-Build and launch orchestration configs without touching YAML directly.
-
-- **Recent configs** — previously used orchestrations appear at the top of the template picker; select one and start a session immediately without re-generating anything
-- Pick from 10 built-in templates (Dev Team, Research, DevOps, Minimal, and more)
-- Edit agents visually: name, description, instructions, model override, endpoint, reasoning effort, plugins, FunctionChoice, TrustScore, MaxTokens
-- Select a stored **Model Profile** per agent to populate model ID, endpoint, and reasoning effort in one click
-- Save to a workspace directory and launch directly into a new session
+- **Recent configs**: orchestrations you've run appear at the top of the template picker; pick one to start a session without generating anything
+- Pick a template, a workspace, an output path and, optionally, a model (your Model Profiles are suggested) and endpoint
+- The generated config is shown with its validation result; edit the files afterwards to customise agents
+- Launch directly into a new session
 
 ### Model Profiles
 Store model IDs, API endpoints, and API keys once — reference them from any orchestration.
@@ -39,10 +36,13 @@ Browse every registered plugin and its functions — name, description, and full
 Attach reference documents to a workspace. Imported files are indexed in `.fuseraft/context/` and injected into agent context at session start.
 
 ### Configs
-Validate existing orchestration YAML files. The panel shows agent names, selection type, and any configuration issues (missing API key env vars, unknown selection strategies, etc.).
+List and validate orchestration configs with `fuseraft validate`, so the checks are the CLI's own. The panel shows agent names, selection type, and every issue found.
 
 ### Schedule
-Define recurring orchestration runs on a cron schedule.
+Add, enable, disable and remove `fuseraft schedule` jobs. Jobs run when `fuseraft schedule run` is ticked by cron or a timer. **Run** starts a job now as a live session with approvals, and doesn't change its schedule.
+
+### Memory
+Browse and delete the memories the REPL and agents keep across sessions.
 
 ### REPL
 An interactive chat interface backed by the fuseraft CLI REPL — the same engine that powers the VS Code extension and the `fuseraft repl` terminal command.
@@ -84,7 +84,7 @@ See `../vsl/` (task.md, pyproject.toml, vsl/ package) for source and full spec. 
 ## Requirements
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
-- The `fuseraft` CLI, speaking wire protocol version 1 (it has `fuseraft run --bridge`). It's found on `PATH`; set `Fuseraft:Binary` in `appsettings.json` (or the `Fuseraft__Binary` environment variable) to use another one.
+- The `fuseraft` CLI, speaking wire protocol version 1 and new enough to have `fuseraft run --bridge` and `fuseraft validate --json`. It's found on `PATH`; set `Fuseraft:Binary` in `appsettings.json` (or the `Fuseraft__Binary` environment variable) to use another one.
 - Linux: `secret-tool` (from `libsecret-tools`) for keychain storage, or keys fall back to plain-text
 
 ---

@@ -83,8 +83,72 @@ public sealed record WireContextFile
 
 public sealed record WireScheduledJob
 {
-    public string Name    { get; init; } = "";
-    public bool   Enabled { get; init; }
+    public string          Name        { get; init; } = "";
+    public string?         Description { get; init; }
+    public string          Cron        { get; init; } = "";
+    public string          Task        { get; init; } = "";
+    public string?         Config      { get; init; }
+    public string?         WorkDir     { get; init; }
+    public bool            Enabled     { get; init; }
+    public bool            Due         { get; init; }
+    public DateTimeOffset  CreatedAt   { get; init; }
+    public DateTimeOffset? LastRun     { get; init; }
+    public DateTimeOffset? NextRun     { get; init; }
+}
+
+public sealed record WireMemory
+{
+    public string Guid        { get; init; } = "";
+    public string Name        { get; init; } = "";
+    public string Type        { get; init; } = "";
+    public string Description { get; init; } = "";
+    public string Body        { get; init; } = "";
+}
+
+public sealed record WireMemoryAgent
+{
+    public string Agent { get; init; } = "";
+    public int    Count { get; init; }
+}
+
+public sealed record WireConfigSummary
+{
+    public string       Path          { get; init; } = "";
+    public string?      Name          { get; init; }
+    public string?      Description   { get; init; }
+    public List<string> Agents        { get; init; } = [];
+    public string?      SelectionType { get; init; }
+    public string?      Error         { get; init; }
+}
+
+public sealed record WireValidation
+{
+    public string             Path   { get; init; } = "";
+    public bool               Valid  { get; init; }
+    public List<WireIssue>    Issues { get; init; } = [];
+    public WireConfigSummary? Config { get; init; }
+}
+
+public sealed record WireIssue
+{
+    public string Level   { get; init; } = "";
+    public string Message { get; init; } = "";
+}
+
+public sealed record WireTemplate
+{
+    public string Key         { get; init; } = "";
+    public string Label       { get; init; } = "";
+    public string Description { get; init; } = "";
+}
+
+public sealed record WireInitResult
+{
+    public string       Template   { get; init; } = "";
+    public string       Model      { get; init; } = "";
+    public string?      Endpoint   { get; init; }
+    public string       ConfigPath { get; init; } = "";
+    public List<string> AgentFiles { get; init; } = [];
 }
 
 public sealed record WirePlugin

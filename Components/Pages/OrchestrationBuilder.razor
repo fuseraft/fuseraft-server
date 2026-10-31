@@ -1,5 +1,4 @@
 @page "/orchestration/builder"
-@using System.Diagnostics
 @implements IDisposable
 @inject OrchestrationTemplateService TemplateService
 @inject NavigationManager Nav
@@ -15,29 +14,27 @@
 </div>
 
 <div class="builder-steps">
-    <div class="builder-step @(_step >= 1 ? (_step > 1 ? "done" : "active") : "")">1. Template</div>
-    <div class="builder-step @(_step >= 2 ? "active" : "")">2. Configure</div>
+    <div class="builder-step @(_step > 1 ? "done" : "active")">1. Template</div>
+    <div class="builder-step @(_step >= 2 ? "active" : "")">2. Generate</div>
 </div>
+
+@if (_error is not null)
+{
+    <div class="error-banner">@_error</div>
+}
 
 @if (_step == 1)
 {
-    @if (_savedConfigs.Count > 0)
+    @if (_recentConfigs.Count > 0)
     {
         <div class="orch-section-label" style="margin-bottom:10px">Recent</div>
         <div class="template-grid">
-            @foreach (var cfg in _savedConfigs)
+            @foreach (var (path, workspace) in _recentConfigs)
             {
-                <button class="template-card @(_selectedSavedConfig?.Path == cfg.Path ? "selected" : "")"
-                        @onclick="() => SelectSavedConfig(cfg)">
-                    <div class="template-card-name">@cfg.Name</div>
-                    <div class="template-card-desc saved-config-path">@cfg.Path</div>
-                    <div class="template-card-agents">
-                        @foreach (var a in cfg.AgentNames)
-                        {
-                            <span class="template-card-agent-pill">@a</span>
-                        }
-                        <span class="template-card-selection-badge">@cfg.SelectionType</span>
-                    </div>
+                <button class="template-card @(_selectedRecent == path ? "selected" : "")"
+                        @onclick="() => SelectRecent(path, workspace)">
+                    <div class="template-card-name">@Path.GetFileName(path)</div>
+                    <div class="template-card-desc saved-config-path">@path</div>
                 </button>
             }
         </div>
@@ -45,283 +42,90 @@
     }
     else
     {
-        <p class="muted" style="margin-bottom:20px">Pick a starting template. You can customise everything in the next step.</p>
+        <p class="muted" style="margin-bottom:20px">Pick a team template. <code>fuseraft init</code> generates the config from it.</p>
     }
-    <div class="template-grid">
-        @foreach (var t in OrchestrationTemplateService.Templates)
-        {
-            <button class="template-card @(_selectedKey == t.Key ? "selected" : "")"
-                    @onclick="() => SelectTemplate(t.Key)">
-                <div class="template-card-name">@t.Name</div>
-                <div class="template-card-desc">@t.Description</div>
-                <div class="template-card-agents">
-                    @foreach (var a in t.DefaultAgents)
-                    {
-                        <span class="template-card-agent-pill">@a</span>
-                    }
-                </div>
-            </button>
-        }
-    </div>
+
+    @if (_templates is null)
+    {
+        <p class="muted">Loading templates…</p>
+    }
+    else
+    {
+        <div class="template-grid">
+            @foreach (var t in _templates)
+            {
+                <button class="template-card @(_selectedKey == t.Key ? "selected" : "")"
+                        @onclick="() => SelectTemplate(t.Key)">
+                    <div class="template-card-name">@t.Label</div>
+                    <div class="template-card-desc">@t.Description</div>
+                    <div class="template-card-agents"><span class="template-card-selection-badge">@t.Key</span></div>
+                </button>
+            }
+        </div>
+    }
     <div style="margin-top:24px; display:flex; gap:10px;">
-        <button class="btn btn-primary" @onclick="GoToStep2" disabled="@(_selectedKey is null && _selectedSavedConfig is null)">Next →</button>
+        <button class="btn btn-primary" @onclick="() => _step = 2" disabled="@(_selectedKey is null && _selectedRecent is null)">Next →</button>
         <a href="/sessions" class="btn">Cancel</a>
     </div>
 }
 
-@if (_step == 2 && _selectedSavedConfig is not null)
+@if (_step == 2)
 {
     <div class="orch-canvas-section">
-        <!-- Left: config details -->
         <div style="min-width:0;">
-            <div class="orch-section-label">Orchestration</div>
-            <div class="orch-container">
-                <div class="orch-container-header">
-                    <span class="orch-container-name">@_selectedSavedConfig.Name</span>
-                    <div class="orch-container-meta">
-                        <span class="orch-selection-badge">@_selectedSavedConfig.SelectionType</span>
-                    </div>
-                </div>
-                <div class="orch-agent-flow">
-                    @for (int i = 0; i < _selectedSavedConfig.AgentNames.Count; i++)
-                    {
-                        @if (i > 0) { <div class="orch-agent-slot"><div class="orch-agent-arrow">→</div></div> }
-                        <div class="orch-agent-slot">
-                            <div class="agent-node">
-                                <div class="agent-node-header">
-                                    <span class="agent-node-name">@_selectedSavedConfig.AgentNames[i]</span>
-                                </div>
-                            </div>
-                        </div>
-                    }
-                </div>
-            </div>
-            <p class="form-hint" style="margin-top:8px; word-break:break-all;">@_selectedSavedConfig.Path</p>
-        </div>
-
-        <!-- Right: side panel -->
-        <div class="orch-side-panel">
-            <div class="form-group">
-                <label class="form-label">Workspace</label>
-                <div class="input-with-btn">
-                    <input class="input" @bind="_workspace" placeholder="/home/user/myproject" />
-                    <button class="btn btn-sm" @onclick="TogglePicker">Browse…</button>
-                </div>
-                @if (_showDirPicker)
-                {
-                    <DirPicker InitialPath="@_workspace" OnSelect="OnDirSelected" OnClose="ClosePicker" />
-                }
-            </div>
-
-            @if (_saveError is not null)
+            @if (_selectedRecent is not null)
             {
-                <div class="error-banner">@_saveError</div>
+                <div class="orch-section-label">Config</div>
+                <p class="mono small" style="word-break:break-all;">@_selectedRecent</p>
             }
-
-            <div class="orch-builder-actions">
-                <button class="btn" @onclick="() => _step = 1">← Back</button>
-                <button class="btn btn-primary" @onclick="StartExistingAsync">Start Session</button>
-            </div>
-        </div>
-    </div>
-}
-
-@if (_step == 2 && _template is not null)
-{
-    <div class="orch-canvas-section">
-
-        <!-- Left: visual canvas + agent editor -->
-        <div style="min-width:0;">
-            <div class="orch-section-label">Orchestration</div>
-            <div class="orch-container">
-                <div class="orch-container-header">
-                    <span class="orch-container-name">@_orchName</span>
-                    <div class="orch-container-meta">
-                        <span class="orch-selection-badge">@_template.SelectionType</span>
-                    </div>
-                </div>
-                <div class="orch-agent-flow">
-                    @for (int i = 0; i < _agents.Count; i++)
-                    {
-                        var agent = _agents[i];
-                        var idx   = i;
-                        @if (i > 0)
-                        {
-                            <div class="orch-agent-slot"><div class="orch-agent-arrow">→</div></div>
-                        }
-                        <div class="orch-agent-slot">
-                            <div class="agent-node @(_selectedAgent == idx ? "selected-node" : "")"
-                                 @onclick="() => SelectAgent(idx)">
-                                <div class="agent-node-header">
-                                    <span class="agent-node-name">@agent.Name</span>
-                                    <span class="agent-node-expand">@(_selectedAgent == idx ? "▲" : "▼")</span>
-                                </div>
-                                <div class="agent-node-model">
-                                    @(string.IsNullOrEmpty(agent.ModelOverride) ? "default" : agent.ModelOverride)
-                                    @if (!string.IsNullOrEmpty(agent.FunctionChoice))
-                                    {
-                                        <span class="agent-fc-pill">@agent.FunctionChoice</span>
-                                    }
-                                </div>
-                                @if (agent.Plugins.Count > 0)
-                                {
-                                    <div class="agent-node-plugins">
-                                        @foreach (var p in agent.Plugins)
-                                        {
-                                            <span class="agent-plugin-pill">@p</span>
-                                        }
-                                    </div>
-                                }
-                            </div>
-                        </div>
-                    }
-                    <div class="orch-agent-slot" style="margin-left:12px;">
-                        <button class="btn btn-sm" @onclick="AddAgent">+ Agent</button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Agent editor panel -->
-            @if (_selectedAgent.HasValue && _selectedAgent.Value < _agents.Count)
+            else if (_generated is null)
             {
-                var a   = _agents[_selectedAgent.Value];
-                var idx = _selectedAgent.Value;
-                <div class="agent-editor-panel">
-                    <div class="agent-editor-title">
-                        <span>Edit Agent</span>
-                        @if (_agents.Count > 1)
+                <div class="orch-section-label">Template</div>
+                <p><strong>@SelectedTemplate?.Label</strong></p>
+                <p class="muted">@SelectedTemplate?.Description</p>
+                <p class="form-hint">Generating writes the config and its agent files, and sets up <code>.fuseraft/</code> in the workspace. Edit the files afterwards to customise agents.</p>
+            }
+            else
+            {
+                <div class="orch-section-label">Generated</div>
+                <p class="mono small" style="word-break:break-all;">@_generated.ConfigPath</p>
+                @if (_generated.AgentFiles.Count > 0)
+                {
+                    <ul class="muted small">
+                        @foreach (var f in _generated.AgentFiles) { <li class="mono">@f</li> }
+                    </ul>
+                }
+                @if (_validation is not null)
+                {
+                    <p>@(_validation.Valid ? "✓ Valid" : "✗ Invalid")
+                        @if (_validation.Config is { } c)
                         {
-                            <button class="btn btn-sm agent-remove-btn" @onclick="() => RemoveAgent(idx)">Remove</button>
+                            <span class="muted small"> — @string.Join(" → ", c.Agents) (@c.SelectionType)</span>
                         }
-                    </div>
-
-                    <!-- Name -->
-                    <div class="form-group">
-                        <label class="form-label">Name</label>
-                        <input class="input" value="@a.Name"
-                               @oninput="e => UpdateAgent(idx, d => d.Name = e.Value?.ToString() ?? string.Empty)" />
-                    </div>
-
-                    <!-- Description -->
-                    <div class="form-group">
-                        <label class="form-label">Description</label>
-                        <input class="input" value="@a.Description" placeholder="Short role description…"
-                               @oninput="e => UpdateAgent(idx, d => d.Description = e.Value?.ToString() ?? string.Empty)" />
-                    </div>
-
-                    <!-- Instructions -->
-                    <div class="form-group">
-                        <label class="form-label">Instructions</label>
-                        <textarea class="input agent-instructions-editor" rows="6"
-                                  placeholder="System prompt / instructions for this agent…"
-                                  @bind="a.Instructions" @bind:event="oninput"></textarea>
-                    </div>
-
-                    <!-- Model override -->
-                    @if (_profiles.Count > 0)
+                    </p>
+                    @if (_validation.Issues.Count > 0)
                     {
-                        <div class="form-group">
-                            <label class="form-label">Use Profile</label>
-                            <select class="input" @onchange="e => ApplyProfileToAgent(idx, e.Value?.ToString())">
-                                <option value="">— none —</option>
-                                @foreach (var p in _profiles)
-                                {
-                                    <option value="@p.Id">@p.Name (@p.ModelId)</option>
-                                }
-                            </select>
-                        </div>
-                    }
-                    <div class="agent-editor-row">
-                        <div class="form-group" style="flex:1;">
-                            <label class="form-label">Model Override</label>
-                            <input class="input" value="@a.ModelOverride" placeholder="(uses global default)"
-                                   @oninput="e => UpdateAgent(idx, d => d.ModelOverride = e.Value?.ToString() ?? string.Empty)" />
-                        </div>
-                        <div class="form-group" style="flex:1;">
-                            <label class="form-label">Endpoint</label>
-                            <input class="input" value="@a.Endpoint" placeholder="https://…"
-                                   @oninput="e => UpdateAgent(idx, d => d.Endpoint = e.Value?.ToString() ?? string.Empty)" />
-                        </div>
-                    </div>
-
-                    <!-- ReasoningEffort + FunctionChoice -->
-                    <div class="agent-editor-row">
-                        <div class="form-group" style="flex:1;">
-                            <label class="form-label">Reasoning Effort</label>
-                            <select class="input" value="@a.ReasoningEffort"
-                                    @onchange="e => UpdateAgent(idx, d => d.ReasoningEffort = e.Value?.ToString() ?? string.Empty)">
-                                <option value="">(not set)</option>
-                                <option value="none">none</option>
-                                <option value="low">low</option>
-                                <option value="medium">medium</option>
-                                <option value="high">high</option>
-                            </select>
-                        </div>
-                        <div class="form-group" style="flex:1;">
-                            <label class="form-label">FunctionChoice</label>
-                            <select class="input" value="@a.FunctionChoice"
-                                    @onchange="e => UpdateAgent(idx, d => d.FunctionChoice = e.Value?.ToString() ?? string.Empty)">
-                                <option value="">— inherit —</option>
-                                <option value="auto">auto</option>
-                                <option value="required">required</option>
-                                <option value="none">none</option>
-                            </select>
-                            <p class="form-hint">Controls whether the agent must call a tool each turn.</p>
-                        </div>
-
-                        <!-- MaxToolCallsPerTurn -->
-                        <div class="form-group" style="flex:1;">
-                            <label class="form-label">Max Tool Calls / Turn</label>
-                            <input class="input" type="number" min="1" max="100"
-                                   value="@(a.MaxToolCallsPerTurn?.ToString() ?? string.Empty)"
-                                   placeholder="(default)"
-                                   @oninput="e => UpdateAgent(idx, d => d.MaxToolCallsPerTurn = TryParseInt(e.Value?.ToString()))" />
-                        </div>
-                    </div>
-
-                    <!-- TrustScore + MaxTokens -->
-                    <div class="agent-editor-row">
-                        <div class="form-group" style="flex:1;">
-                            <label class="form-label">TrustScore <span class="form-label-muted">0.0 – 1.0</span></label>
-                            <input class="input" type="number" min="0" max="1" step="0.05"
-                                   value="@(a.TrustScore?.ToString("F2") ?? string.Empty)"
-                                   placeholder="(default)"
-                                   @oninput="e => UpdateAgent(idx, d => d.TrustScore = TryParseDouble(e.Value?.ToString()))" />
-                            <p class="form-hint">≥ 0.8 → ring 1 (least restricted sandbox).</p>
-                        </div>
-                        <div class="form-group" style="flex:1;">
-                            <label class="form-label">MaxTokens</label>
-                            <input class="input" type="number" min="256" step="256"
-                                   value="@(a.MaxTokens?.ToString() ?? string.Empty)"
-                                   placeholder="(model default)"
-                                   @oninput="e => UpdateAgent(idx, d => d.MaxTokens = TryParseInt(e.Value?.ToString()))" />
-                            <p class="form-hint">Override the model's max output tokens.</p>
-                        </div>
-                    </div>
-
-                    <!-- Plugins -->
-                    <div class="form-group">
-                        <label class="form-label">Plugins</label>
-                        <div class="agent-plugin-toggles">
-                            @foreach (var plugin in AllPlugins)
+                        <ul class="issue-list">
+                            @foreach (var issue in _validation.Issues)
                             {
-                                var has = a.Plugins.Contains(plugin);
-                                <button class="btn btn-sm @(has ? "btn-primary" : "")"
-                                        @onclick="() => TogglePlugin(idx, plugin)">@plugin</button>
+                                <li class="issue-@issue.Level">
+                                    <span class="issue-icon">@(issue.Level == "error" ? "✗" : "⚠")</span>
+                                    @issue.Message
+                                </li>
                             }
-                        </div>
-                    </div>
-                </div>
+                        </ul>
+                    }
+                }
+                <textarea class="orch-yaml-editor" readonly>@_generatedYaml</textarea>
             }
         </div>
 
-        <!-- Right: side panel -->
         <div class="orch-side-panel">
             <div class="form-group">
                 <label class="form-label">Workspace</label>
                 <div class="input-with-btn">
-                    <input class="input" @bind="_workspace" placeholder="/home/user/myproject" />
-                    <button class="btn btn-sm" @onclick="TogglePicker">Browse…</button>
+                    <input class="input" @bind="_workspace" placeholder="/home/user/myproject" disabled="@(_generated is not null)" />
+                    <button class="btn btn-sm" @onclick="TogglePicker" disabled="@(_generated is not null)">Browse…</button>
                 </div>
                 @if (_showDirPicker)
                 {
@@ -329,100 +133,92 @@
                 }
             </div>
 
-            <div class="form-group">
-                <label class="form-label">Config File</label>
-                <input class="input" @bind="_configRelPath" placeholder=".fuseraft/config/orchestration.yaml" />
-                @if (!string.IsNullOrWhiteSpace(_workspace) && !string.IsNullOrWhiteSpace(_configRelPath)
-                     && !Path.IsPathRooted(_configRelPath))
-                {
-                    <p class="orch-save-path">→ @Path.Combine(_workspace.Trim(), _configRelPath.Trim())</p>
-                }
-            </div>
-
-            @if (_saveError is not null)
+            @if (_selectedRecent is null && _generated is null)
             {
-                <div class="error-banner">@_saveError</div>
+                <div class="form-group">
+                    <label class="form-label">Config File</label>
+                    <input class="input" @bind="_configRelPath" placeholder=".fuseraft/config/orchestration.yaml" />
+                    @if (!string.IsNullOrWhiteSpace(_workspace) && !string.IsNullOrWhiteSpace(_configRelPath)
+                         && !Path.IsPathRooted(_configRelPath))
+                    {
+                        <p class="orch-save-path">→ @Path.Combine(_workspace.Trim(), _configRelPath.Trim())</p>
+                    }
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Model <span class="form-optional">(optional)</span></label>
+                    <input class="input" @bind="_model" list="builder-models" placeholder="Detected from your API keys" />
+                    <datalist id="builder-models">
+                        @foreach (var p in _profiles) { <option value="@p.ModelId">@p.Name</option> }
+                    </datalist>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Endpoint <span class="form-optional">(optional)</span></label>
+                    <input class="input" @bind="_endpoint" placeholder="From ~/.fuseraft/config" />
+                </div>
+                <label class="small"><input type="checkbox" @bind="_force" /> Overwrite existing files</label>
             }
 
             <div class="orch-builder-actions">
-                <button class="btn" @onclick="() => _step = 1">← Back</button>
-                <button class="btn btn-primary" @onclick="SaveAndStartAsync" disabled="@_saving">
-                    @(_saving ? "Saving…" : "Save & Start Session")
-                </button>
-                <button class="btn" @onclick="SaveOnlyAsync" disabled="@_saving">
-                    @(_saving ? "Saving…" : "Save Only")
-                </button>
+                @if (_generated is null)
+                {
+                    <button class="btn" @onclick="Back">← Back</button>
+                }
+                @if (_selectedRecent is null && _generated is null)
+                {
+                    <button class="btn btn-primary" @onclick="GenerateAsync" disabled="@_busy">
+                        @(_busy ? "Generating…" : "Generate")
+                    </button>
+                }
+                else
+                {
+                    <button class="btn btn-primary" @onclick="StartSession">Start Session</button>
+                }
+                @if (_generated is not null)
+                {
+                    <a href="/configs" class="btn">Done</a>
+                }
             </div>
         </div>
     </div>
 }
 
 @code {
-    private static readonly string[] AllPlugins =
-    [
-        "FileSystem", "Shell", "Git", "Search",
-        "Http", "Json", "Document",
-        "CodeExecution", "Probe",
-        "Scratchpad", "Chatroom", "Changes",
-        "SubAgent", "Handoff",
-    ];
-
-    private int              _step        = 1;
-    private string?          _selectedKey;
-    private TemplateInfo?    _template;
-    private ConfigSummary?   _selectedSavedConfig;
-    private List<ConfigSummary> _savedConfigs = [];
-
-    private string  _orchName      = string.Empty;
-    private string  _workspace     = string.Empty;
-    private string  _configRelPath = ".fuseraft/config/orchestration.yaml";
-    private bool    _showDirPicker = false;
-    private bool    _saving        = false;
-    private string? _saveError;
-    private int?    _selectedAgent;
-
+    private int                 _step = 1;
+    private List<WireTemplate>? _templates;
+    private string?             _selectedKey;
+    private string?             _selectedRecent;
+    private List<(string Path, string? Workspace)> _recentConfigs = [];
     private IReadOnlyList<ModelProfile> _profiles = [];
 
-    private List<AgentDraft> _agents = [];
+    private string  _workspace     = string.Empty;
+    private string  _configRelPath = ".fuseraft/config/orchestration.yaml";
+    private string  _model         = string.Empty;
+    private string  _endpoint      = string.Empty;
+    private bool    _force;
+    private bool    _showDirPicker;
+    private bool    _busy;
+    private string? _error;
 
-    private sealed class AgentDraft
-    {
-        public string  Name               { get; set; } = string.Empty;
-        public string  Description        { get; set; } = string.Empty;
-        public string  Instructions       { get; set; } = string.Empty;
-        public string  ModelOverride      { get; set; } = string.Empty;
-        public string  Endpoint           { get; set; } = string.Empty;
-        public string  ReasoningEffort    { get; set; } = string.Empty;
-        public string  FunctionChoice     { get; set; } = string.Empty;
-        public double? TrustScore         { get; set; }
-        public int?    MaxTokens          { get; set; }
-        public int?    MaxToolCallsPerTurn { get; set; }
-        public List<string> Plugins       { get; set; } = [];
-    }
+    private WireInitResult? _generated;
+    private WireValidation? _validation;
+    private string          _generatedYaml = string.Empty;
+
+    private WireTemplate? SelectedTemplate => _templates?.FirstOrDefault(t => t.Key == _selectedKey);
 
     protected override async Task OnInitializedAsync()
     {
-        if (string.IsNullOrWhiteSpace(_workspace))
-            _workspace = WorkspaceService.Current;
-        WorkspaceService.Changed       += OnWorkspaceChanged;
-        ProfileService.ProfilesChanged += OnProfilesChanged;
-        _profiles    = await ProfileService.ListAsync();
-        _savedConfigs = LoadSavedConfigs();
-    }
-
-    private List<ConfigSummary> LoadSavedConfigs() =>
-        SessionHostService.GetSessions()
+        _workspace = WorkspaceService.Current;
+        WorkspaceService.Changed += OnWorkspaceChanged;
+        _profiles = await ProfileService.ListAsync();
+        _recentConfigs = SessionHostService.GetSessions()
             .Where(s => !string.IsNullOrEmpty(s.ConfigPath) && File.Exists(s.ConfigPath))
             .DistinctBy(s => s.ConfigPath, StringComparer.OrdinalIgnoreCase)
             .Take(10)
-            .Select(s =>
-            {
-                try   { return ConfigService.Validate(s.ConfigPath).Summary; }
-                catch { return null; }
-            })
-            .Where(s => s is not null)
-            .Select(s => s!)
+            .Select(s => (s.ConfigPath, s.WorkingDirectory))
             .ToList();
+        try { _templates = await TemplateService.ListAsync(); }
+        catch (FuseraftCliException ex) { _templates = []; _error = ex.Message; }
+    }
 
     private void OnWorkspaceChanged() =>
         InvokeAsync(() =>
@@ -434,188 +230,50 @@
             }
         });
 
-    private void OnProfilesChanged() =>
-        InvokeAsync(async () =>
-        {
-            _profiles = await ProfileService.ListAsync();
-            StateHasChanged();
-        });
+    public void Dispose() => WorkspaceService.Changed -= OnWorkspaceChanged;
 
-    public void Dispose()
+    private void SelectTemplate(string key) { _selectedKey = key; _selectedRecent = null; }
+
+    private void SelectRecent(string path, string? workspace)
     {
-        WorkspaceService.Changed       -= OnWorkspaceChanged;
-        ProfileService.ProfilesChanged -= OnProfilesChanged;
+        _selectedRecent = path;
+        _selectedKey    = null;
+        if (!string.IsNullOrWhiteSpace(workspace)) _workspace = workspace;
     }
 
-    private void ApplyProfileToAgent(int idx, string? profileId)
+    private void Back() { _step = 1; _error = null; }
+
+    private async Task GenerateAsync()
     {
-        var prof = _profiles.FirstOrDefault(p => p.Id == profileId);
-        if (prof is null) return;
-        UpdateAgent(idx, d =>
-        {
-            d.ModelOverride   = prof.ModelId;
-            d.Endpoint        = prof.Endpoint;
-            d.ReasoningEffort = prof.ReasoningEffort ?? string.Empty;
-        });
-    }
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_workspace))     { _error = "Workspace is required."; return; }
+        if (!Directory.Exists(_workspace.Trim()))      { _error = $"Workspace not found: {_workspace.Trim()}"; return; }
+        if (string.IsNullOrWhiteSpace(_configRelPath)) { _error = "Config file path is required."; return; }
+        if (_selectedKey is null) return;
 
-    private void SelectTemplate(string key)    { _selectedKey = key; _selectedSavedConfig = null; StateHasChanged(); }
-    private void SelectSavedConfig(ConfigSummary cfg) { _selectedSavedConfig = cfg; _selectedKey = null; StateHasChanged(); }
-
-    private Task GoToStep2()
-    {
-        if (_selectedSavedConfig is not null)
-        {
-            _template = null;
-            _step     = 2;
-            StateHasChanged();
-            return Task.CompletedTask;
-        }
-
-        if (_selectedKey is null) return Task.CompletedTask;
-        _template = TemplateService.GetTemplate(_selectedKey);
-        if (_template is null) return Task.CompletedTask;
-
-        _orchName = _template.Name;
-        _agents   = _template.DefaultAgents.Select(n => new AgentDraft
-        {
-            Name    = n,
-            Plugins = ["FileSystem", "Shell"],
-        }).ToList();
-        _selectedAgent = null;
-
-        _step = 2;
+        _busy = true;
         StateHasChanged();
-        return Task.CompletedTask;
-    }
-
-    private Task StartExistingAsync()
-    {
-        _saveError = null;
-        if (_selectedSavedConfig is null) return Task.CompletedTask;
-        if (string.IsNullOrWhiteSpace(_workspace)) { _saveError = "Workspace is required."; StateHasChanged(); return Task.CompletedTask; }
-        var ws  = _workspace.Trim();
-        var cfg = _selectedSavedConfig.Path;
-        Nav.NavigateTo($"/sessions?workspace={Uri.EscapeDataString(ws)}&config={Uri.EscapeDataString(cfg)}&new=true");
-        return Task.CompletedTask;
-    }
-
-    private void SelectAgent(int idx)
-    {
-        _selectedAgent = _selectedAgent == idx ? null : idx;
-        StateHasChanged();
-    }
-
-    private void UpdateAgent(int idx, Action<AgentDraft> mutate)
-    {
-        mutate(_agents[idx]);
-        StateHasChanged();
-    }
-
-    private void AddAgent()
-    {
-        _agents.Add(new AgentDraft { Name = $"Agent-{_agents.Count + 1}", Plugins = [] });
-        _selectedAgent = _agents.Count - 1;
-        StateHasChanged();
-    }
-
-    private void RemoveAgent(int idx)
-    {
-        _agents.RemoveAt(idx);
-        _selectedAgent = null;
-        StateHasChanged();
-    }
-
-    private void TogglePlugin(int idx, string plugin)
-    {
-        var list = _agents[idx].Plugins;
-        if (list.Contains(plugin)) list.Remove(plugin);
-        else list.Add(plugin);
-        StateHasChanged();
-    }
-
-    private async Task<(bool Ok, string Yaml, string Error)> RunInitAsync(string outputPath)
-    {
         try
         {
-            var workDir = string.IsNullOrWhiteSpace(_workspace)
-                ? Directory.GetCurrentDirectory()
-                : _workspace.Trim();
-
-            var psi = new ProcessStartInfo
-            {
-                FileName               = "fuseraft",
-                UseShellExecute        = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError  = true,
-                WorkingDirectory       = workDir,
-            };
-            psi.ArgumentList.Add("init");
-            psi.ArgumentList.Add(outputPath);
-            psi.ArgumentList.Add("-t");
-            psi.ArgumentList.Add(_selectedKey ?? "minimal");
-            psi.ArgumentList.Add("-m");
-            psi.ArgumentList.Add(
-                _agents.Select(a => a.ModelOverride).FirstOrDefault(m => !string.IsNullOrEmpty(m))
-                ?? "claude-opus-4-5");
-            psi.ArgumentList.Add("--no-interactive");
-
-            using var proc = Process.Start(psi)!;
-            await proc.WaitForExitAsync();
-
-            if (proc.ExitCode != 0)
-            {
-                var err = await proc.StandardError.ReadToEndAsync();
-                return (false, string.Empty, err.Trim());
-            }
-
-            var yaml = await File.ReadAllTextAsync(outputPath);
-            return (true, yaml, string.Empty);
+            var ws = _workspace.Trim();
+            WorkspaceService.Set(ws);
+            _generated     = await TemplateService.GenerateAsync(ws, _selectedKey, _configRelPath.Trim(), _model.Trim(), _endpoint.Trim(), _force);
+            _generatedYaml = await File.ReadAllTextAsync(_generated.ConfigPath);
+            _validation    = await ConfigService.ValidateAsync(_generated.ConfigPath);
         }
-        catch (Exception ex)
-        {
-            return (false, string.Empty, ex.Message);
-        }
+        catch (FuseraftCliException ex) { _error = ex.Message; }
+        finally { _busy = false; }
     }
 
-    private void TogglePicker()  { _showDirPicker = !_showDirPicker; StateHasChanged(); }
-    private void ClosePicker()   { _showDirPicker = false; StateHasChanged(); }
-    private void OnDirSelected(string path) { _workspace = path; _showDirPicker = false; WorkspaceService.Set(path); StateHasChanged(); }
-
-    private static int?    TryParseInt(string? s)    => int.TryParse(s, out var v)    ? v : null;
-    private static double? TryParseDouble(string? s) => double.TryParse(s, out var v) ? v : null;
-
-    private async Task SaveAndStartAsync()
+    private void StartSession()
     {
-        if (!await SaveConfigAsync()) return;
-        var ws  = _workspace.Trim();
-        var cfg = _configRelPath.Trim();
-        Nav.NavigateTo($"/sessions?workspace={Uri.EscapeDataString(ws)}&config={Uri.EscapeDataString(cfg)}&new=true");
+        if (string.IsNullOrWhiteSpace(_workspace)) { _error = "Workspace is required."; return; }
+        var cfg = _generated?.ConfigPath ?? _selectedRecent;
+        if (cfg is null) return;
+        Nav.NavigateTo($"/sessions?workspace={Uri.EscapeDataString(_workspace.Trim())}&config={Uri.EscapeDataString(cfg)}&new=true");
     }
 
-    private async Task SaveOnlyAsync() => await SaveConfigAsync();
-
-    private async Task<bool> SaveConfigAsync()
-    {
-        _saveError = null;
-
-        if (string.IsNullOrWhiteSpace(_workspace))     { _saveError = "Workspace is required."; return false; }
-        if (string.IsNullOrWhiteSpace(_configRelPath)) { _saveError = "Config file path is required."; return false; }
-
-        _saving = true;
-        StateHasChanged();
-
-        try
-        {
-            var ws      = _workspace.Trim();
-            var relPath = _configRelPath.Trim();
-            var absPath = Path.IsPathRooted(relPath) ? relPath : Path.GetFullPath(Path.Combine(ws, relPath));
-
-            var (ok, _, err) = await RunInitAsync(absPath);
-            if (!ok) { _saveError = string.IsNullOrWhiteSpace(err) ? "fuseraft init failed." : err; return false; }
-            return true;
-        }
-        catch (Exception ex) { _saveError = ex.Message; return false; }
-        finally { _saving = false; StateHasChanged(); }
-    }
+    private void TogglePicker()  => _showDirPicker = !_showDirPicker;
+    private void ClosePicker()   => _showDirPicker = false;
+    private void OnDirSelected(string path) { _workspace = path; _showDirPicker = false; WorkspaceService.Set(path); }
 }

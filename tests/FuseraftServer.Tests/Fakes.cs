@@ -13,10 +13,15 @@ internal sealed class FakeCli() : FuseraftCli(Options.Create(new FuseraftCliOpti
     public Queue<FakeBridge> Bridges { get; } = new();
     public List<(string[] Args, string? Cwd)> Started { get; } = [];
 
-    protected override Task<JsonDocument> QueryAsync(string[] args) =>
-        Responses.TryGetValue(string.Join(' ', args), out var json)
+    public List<(string[] Args, string? Cwd)> Queries { get; } = [];
+
+    protected override Task<JsonDocument> QueryAsync(string[] args, string? workingDirectory = null)
+    {
+        Queries.Add((args, workingDirectory));
+        return Responses.TryGetValue(string.Join(' ', args), out var json)
             ? Task.FromResult(JsonDocument.Parse(json))
             : throw new FuseraftCliException($"no canned response for '{string.Join(' ', args)}'");
+    }
 
     public override Task RunAsync(params string[] args)
     {
