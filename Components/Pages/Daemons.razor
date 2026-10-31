@@ -1,0 +1,278 @@
+@page "/daemons"
+@implements IDisposable
+@inject DaemonService DaemonService
+@inject HitlBroker Broker
+
+<PageTitle>Daemons — Fuseraft</PageTitle>
+
+<div class="page-header">
+    <h1>Daemons</h1>
+    <button class="btn btn-primary" @onclick="OpenAdd">+ Add Daemon</button>
+</div>
+
+<p class="muted" style="margin-bottom:16px">
+    Attach to a running <code>fuseraft serve</code> over its WebSocket to send it tasks, watch its progress
+    and answer its approvals.
+</p>
+
+@if (_showAdd)
+{
+    <div class="dialog-backdrop" @onclick="CloseAdd">
+        <div class="dialog" @onclick:stopPropagation>
+            <div class="dialog-header">
+                <h2>Add Daemon</h2>
+                <button class="btn-icon" @onclick="CloseAdd">✕</button>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Name</label>
+                <input @bind="_addName" class="input" placeholder="build-box" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Attach URL</label>
+                <input @bind="_addUrl" class="input" placeholder="ws://build-box.lan:24601/attach" />
+                <p class="form-hint"><code>fuseraft serve</code> prints it as "Attach WebSocket".</p>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Token <span class="form-optional">(optional)</span></label>
+                <input @bind="_addToken" class="input" type="password" autocomplete="off" />
+                <p class="form-hint">The daemon's <code>FUSERAFT_SERVE_TOKEN</code>. Kept in memory until this server stops;
+                    add daemons to <code>Fuseraft:Daemons</code> to keep them.</p>
+            </div>
+            @if (_addError is not null)
+            {
+                <div class="error-banner">@_addError</div>
+            }
+            <div class="dialog-footer">
+                <button class="btn" @onclick="CloseAdd">Cancel</button>
+                <button class="btn btn-primary" @onclick="AddAsync">Add and Connect</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_connections.Count == 0)
+{
+    <div class="empty-state">
+        <div class="empty-icon">⇄</div>
+        <p>No daemons yet.</p>
+        <p class="muted">Start one with <code>fuseraft serve</code>, then add its attach URL here.</p>
+    </div>
+}
+else
+{
+    <table class="data-table" style="margin-bottom:24px">
+        <thead>
+            <tr><th>Name</th><th>URL</th><th>Status</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var c in _connections)
+            {
+                <tr class="clickable" @key="c.Id" @onclick="() => _selected = c.Id"
+                    style="@(c.Id == _selected ? "background:var(--surface2)" : "")">
+                    <td><strong>@c.Endpoint.Name</strong></td>
+                    <td class="mono small">@c.Endpoint.Url</td>
+                    <td>
+                        <span class="status-badge @BadgeClass(c)">@BadgeLabel(c)</span>
+                        @if (c.State == DaemonState.Disconnected && c.Error is not null)
+                        {
+                            <div class="muted small">@c.Error</div>
+                        }
+                    </td>
+                    <td class="nowrap" @onclick:stopPropagation>
+                        @if (c.State == DaemonState.Disconnected)
+                        {
+                            <button class="btn btn-sm" @onclick="() => ConnectAsync(c)">Connect</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-sm" @onclick="() => c.DisconnectAsync()">Disconnect</button>
+                        }
+                        @if (!c.Configured)
+                        {
+                            <button class="btn btn-sm btn-danger" @onclick="() => DaemonService.RemoveAsync(c.Id)">Remove</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@if (Selected is { } d)
+{
+    <h2 style="margin-bottom:12px">@d.Endpoint.Name</h2>
+
+    @foreach (var req in _approvals)
+    {
+        <ApprovalCard @key="req.Id" Request="req" ShowSource="false" />
+    }
+
+    <div class="form-group">
+        <label class="form-label">Task</label>
+        <textarea @bind="_task" @bind:event="oninput" rows="3" class="input" disabled="@(d.State != DaemonState.Connected)"
+                  placeholder="What should the daemon's team do?"></textarea>
+        @if (d.State == DaemonState.Connected && !d.CanDispatch)
+        {
+            <p class="form-hint">Waiting for your last task to finish. The daemon takes one task at a time from each connection.</p>
+        }
+    </div>
+    @if (_dispatchError is not null)
+    {
+        <div class="error-banner">@_dispatchError</div>
+    }
+    <button class="btn btn-primary" @onclick="() => DispatchAsync(d)"
+            disabled="@(!d.CanDispatch || string.IsNullOrWhiteSpace(_task))">Send Task</button>
+
+    @if (d.Tasks.Count > 0)
+    {
+        <div class="orch-section-label" style="margin-top:24px; margin-bottom:8px">Your tasks</div>
+        <table class="data-table">
+            <thead>
+                <tr><th>Session</th><th>Task</th><th>Status</th><th>Result</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var t in d.Tasks)
+                {
+                    <tr @key="t.SessionId">
+                        <td class="id-cell">@t.SessionId</td>
+                        <td>@t.Task</td>
+                        <td class="nowrap"><span class="status-badge @TaskBadgeClass(t)">@TaskLabel(t)</span></td>
+                        <td>
+                            @if (t.ErrorMessage is not null) { <div class="muted small">@t.ErrorMessage</div> }
+                            @if (t.LastMessage is not null)
+                            {
+                                <div class="small">@(t.LastAgent is null ? "" : $"{t.LastAgent}: ")@t.LastMessage</div>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    <div class="orch-section-label" style="margin-top:24px; margin-bottom:8px">Activity <span class="muted small">(every client's tasks)</span></div>
+    <div class="live-feed">
+        @if (d.Activity.Count == 0)
+        {
+            <div class="feed-empty muted">Nothing yet.</div>
+        }
+        @foreach (var a in d.Activity.Reverse().Take(100))
+        {
+            <div class="small"><span class="muted mono">@a.At.LocalDateTime.ToString("HH:mm:ss")</span> @a.Text</div>
+        }
+    </div>
+}
+
+@code {
+    private List<DaemonConnection> _connections = [];
+    private List<PendingApproval> _approvals = [];
+    private Guid?   _selected;
+    private string  _task = string.Empty;
+    private string? _dispatchError;
+
+    private bool    _showAdd;
+    private string  _addName  = string.Empty;
+    private string  _addUrl   = string.Empty;
+    private string  _addToken = string.Empty;
+    private string? _addError;
+
+    private DaemonConnection? Selected => _selected is { } id ? DaemonService.Get(id) : null;
+
+    protected override void OnInitialized()
+    {
+        DaemonService.Changed       += OnChanged;
+        Broker.PendingChanged += OnChanged;
+        Refresh();
+        _selected = _connections.FirstOrDefault()?.Id;
+    }
+
+    private void Refresh()
+    {
+        foreach (var c in _connections) c.Changed -= OnChanged;
+        _connections = [.. DaemonService.Connections];
+        foreach (var c in _connections) c.Changed += OnChanged;
+        if (_selected is { } id && _connections.All(c => c.Id != id)) _selected = _connections.FirstOrDefault()?.Id;
+        var name = Selected?.Endpoint.Name;
+        _approvals = [.. Broker.GetPending().Where(p => p.Source == ApprovalSource.Daemon && p.Origin == name)];
+    }
+
+    private void OnChanged() => InvokeAsync(() => { Refresh(); StateHasChanged(); });
+
+    private void OpenAdd()
+    {
+        _showAdd  = true;
+        _addError = null;
+        _addName  = _addUrl = _addToken = string.Empty;
+    }
+
+    private void CloseAdd() => _showAdd = false;
+
+    private async Task AddAsync()
+    {
+        if (DaemonService.Validate(_addName, _addUrl) is { } problem)
+        {
+            _addError = problem;
+            return;
+        }
+        var connection = DaemonService.Add(_addName, _addUrl, _addToken);
+        _addToken = string.Empty;
+        _showAdd  = false;
+        _selected = connection.Id;
+        Refresh();
+        await connection.ConnectAsync();
+    }
+
+    private async Task ConnectAsync(DaemonConnection c)
+    {
+        _selected = c.Id;
+        await c.ConnectAsync();
+    }
+
+    private async Task DispatchAsync(DaemonConnection d)
+    {
+        _dispatchError = null;
+        try
+        {
+            await d.DispatchAsync(_task.Trim());
+            _task = string.Empty;
+        }
+        catch (Exception ex) { _dispatchError = ex.Message; }
+    }
+
+    private static string BadgeLabel(DaemonConnection c) => c.State switch
+    {
+        DaemonState.Connected  => "● Connected",
+        DaemonState.Connecting => "● Connecting",
+        _                      => c.Error is null ? "Disconnected" : "✗ Disconnected",
+    };
+
+    private static string BadgeClass(DaemonConnection c) => c.State switch
+    {
+        DaemonState.Connected  => "badge-ok",
+        DaemonState.Connecting => "badge-blue badge-pulse",
+        _                      => c.Error is null ? "badge-muted" : "badge-err",
+    };
+
+    private static string TaskLabel(DaemonTask t) => t.Status switch
+    {
+        DaemonTaskStatus.Queued    => "● In progress",
+        DaemonTaskStatus.Succeeded => "✓ Complete",
+        DaemonTaskStatus.Failed    => "✗ Failed",
+        _                          => "? Lost",
+    };
+
+    private static string TaskBadgeClass(DaemonTask t) => t.Status switch
+    {
+        DaemonTaskStatus.Queued    => "badge-blue badge-pulse",
+        DaemonTaskStatus.Succeeded => "badge-ok",
+        DaemonTaskStatus.Failed    => "badge-err",
+        _                          => "badge-muted",
+    };
+
+    public void Dispose()
+    {
+        DaemonService.Changed       -= OnChanged;
+        Broker.PendingChanged -= OnChanged;
+        foreach (var c in _connections) c.Changed -= OnChanged;
+    }
+}

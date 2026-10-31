@@ -9,6 +9,10 @@
             {
                 <a href="/sessions/@Request.SessionId" class="hitl-session-link">@Request.SessionId</a>
             }
+            else if (Request.Source == ApprovalSource.Daemon)
+            {
+                <a href="/daemons" class="hitl-session-link">@Request.Origin · @Request.SessionId</a>
+            }
             else
             {
                 <a href="/repl" class="hitl-session-link">REPL · @Request.SessionId</a>

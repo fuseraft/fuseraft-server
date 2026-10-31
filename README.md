@@ -38,6 +38,21 @@ Attach reference documents to a workspace. Imported files are indexed in `.fuser
 ### Configs
 List and validate orchestration configs with `fuseraft validate`, so the checks are the CLI's own. The panel shows agent names, selection type, and every issue found.
 
+### Daemons
+Attach to a running `fuseraft serve`, on this machine or another, over its attach WebSocket. Send it tasks, see your tasks' results, follow every task's live progress (including tasks other clients and the daemon itself started), and answer approvals for the tasks you sent, here or on the HITL page. A connection runs one of your tasks at a time, as `fuseraft attach` does.
+
+Add daemons on the page (kept until the server stops), or list them in `appsettings.json`:
+
+```json
+"Fuseraft": {
+  "Daemons": [
+    { "Name": "build-box", "Url": "ws://build-box.lan:24601/attach" }
+  ]
+}
+```
+
+Set a daemon's token with an environment variable rather than in the file: `Fuseraft__Daemons__0__Token=<the daemon's FUSERAFT_SERVE_TOKEN>`. Anyone who can open this server can send tasks to its daemons and approve their commands, so don't expose the server more widely than the daemons themselves.
+
 ### Schedule
 Add, enable, disable and remove `fuseraft schedule` jobs. Jobs run when `fuseraft schedule run` is ticked by cron or a timer. **Run** starts a job now as a live session with approvals, and doesn't change its schedule.
 
@@ -56,7 +71,7 @@ An interactive chat interface backed by the fuseraft CLI REPL — the same engin
 - Internally the server spawns `fuseraft repl --vscode --no-banner` and speaks the same JSON-line protocol (`ready`, `token`, `tool_call`, `message_end`, `plan`, `step_status`, `session_end`, …) used by the VS Code extension
 
 ### HITL (Human-in-the-Loop)
-Every approval a session or REPL chat is waiting on, in one place, with a badge count in the nav. Shell commands show the command, file writes show a diff, and agent handoffs show who hands off to whom. Approve or deny, and the waiting process carries on. The same cards also appear on the session's page and in the REPL chat.
+Every approval a session, REPL chat or daemon task is waiting on, in one place, with a badge count in the nav. Shell commands show the command, file writes show a diff, and agent handoffs show who hands off to whom. Approve or deny, and the waiting process carries on. The same cards also appear on the session's page and in the REPL chat.
 
 ---
 
@@ -84,7 +99,7 @@ See `../vsl/` (task.md, pyproject.toml, vsl/ package) for source and full spec. 
 ## Requirements
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
-- The `fuseraft` CLI, speaking wire protocol version 1 and new enough to have `fuseraft run --bridge` and `fuseraft validate --json`. It's found on `PATH`; set `Fuseraft:Binary` in `appsettings.json` (or the `Fuseraft__Binary` environment variable) to use another one.
+- The `fuseraft` CLI, speaking wire protocol version 1 and new enough to have `fuseraft run --bridge` and `fuseraft validate --json`. The Daemons page needs daemons new enough to serve the attach WebSocket (`fuseraft attach --url`). It's found on `PATH`; set `Fuseraft:Binary` in `appsettings.json` (or the `Fuseraft__Binary` environment variable) to use another one.
 - Linux: `secret-tool` (from `libsecret-tools`) for keychain storage, or keys fall back to plain-text
 
 ---

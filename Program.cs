@@ -1,6 +1,7 @@
 using fuseraft.Server.Components;
 using fuseraft.Server.Services;
 using fuseraft.Server.Services.Cli;
+using fuseraft.Server.Services.Daemons;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,6 +21,7 @@ builder.Services.AddSingleton<OrchestrationTemplateService>();
 builder.Services.AddSingleton<WorkspaceService>();
 builder.Services.AddSingleton<ModelProfileService>();
 builder.Services.AddSingleton<ReplService>();
+builder.Services.AddSingleton<DaemonService>();
 
 var app = builder.Build();
 
