@@ -10,8 +10,8 @@ fuseraft-web doesn't link fuseraft's code. It runs the `fuseraft` CLI and speaks
 
 ## Quick start
 
-1. Install the `fuseraft` CLI (protocol version 1; see [Requirements](#requirements)).
-2. Download the archive for your platform from [Releases](https://github.com/fuseraft/fuseraft-server/releases), unpack it, and run `./fuseraft-web` (`fuseraft-web.exe` on Windows).
+1. Install the [`fuseraft` CLI](https://github.com/fuseraft/fuseraft-cli/releases), v1.13.0 or later.
+2. Download the archive for your platform from [Releases](https://github.com/fuseraft/fuseraft-web/releases), unpack it, and run `./fuseraft-web` (`fuseraft-web.exe` on Windows).
 3. The log prints a one-time setup link:
 
    ```
@@ -148,7 +148,7 @@ To serve other machines, put fuseraft-web behind a TLS reverse proxy: see [docs/
 
 ## Requirements
 
-- The `fuseraft` CLI, speaking wire protocol version 1 and new enough to have `fuseraft run --bridge` and `fuseraft validate --json`. The Daemons page needs daemons new enough to serve the attach WebSocket.
+- The `fuseraft` CLI, v1.13.0 or later (wire protocol version 1). On `PATH`, or set `Fuseraft:Binary`. The Daemons page needs daemons on v1.13.0 or later too, for the attach WebSocket.
 - Linux: `secret-tool` (from `libsecret-tools`) to keep API keys in the keychain; otherwise they fall back to mode-600 files.
 - Release archives are self-contained. Building from source needs the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
