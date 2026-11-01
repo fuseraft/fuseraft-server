@@ -259,12 +259,14 @@ public sealed class DaemonConnectionTests
     [Fact]
     public async Task Disconnect_StopsReconnecting()
     {
-        var c = await ConnectedAsync(retry: TimeSpan.FromMilliseconds(100));
+        // Long enough that polling can't miss the Reconnecting state, which ends when the retry starts.
+        var retry = TimeSpan.FromSeconds(1);
+        var c = await ConnectedAsync(retry);
         First.Close();
         await Eventually(() => c.State == DaemonState.Reconnecting ? c : null);
 
         await c.DisconnectAsync();
-        await Task.Delay(300);
+        await Task.Delay(retry * 1.5);
 
         Assert.Equal((DaemonState.Disconnected, 1), (c.State, Attempts));
     }
