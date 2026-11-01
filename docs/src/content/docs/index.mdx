@@ -1,0 +1,50 @@
+---
+title: fuseraft-web
+description: fuseraft in the browser, shared by a team. Run and watch sessions, chat with the REPL, approve what agents want to do, and drive fuseraft daemons on other machines.
+template: splash
+hero:
+  tagline: fuseraft in the browser, shared by a team. Run and watch agent sessions, chat with the fuseraft REPL, approve what agents want to do, and drive fuseraft daemons on other machines, with an account per person.
+  image:
+    file: ../../assets/logo.svg
+  actions:
+    - text: Get started
+      link: /fuseraft-web/start/quickstart/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/fuseraft/fuseraft-web
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import daemons from '../../assets/daemons.png';
+
+<Image src={daemons} alt="The Daemons page: a connected daemon asking to run npm test, with Approve and Deny buttons" class="screenshot" />
+
+<CardGrid stagger>
+	<Card title="An account per person" icon="seti:lock">
+		Local passwords, single sign-on with any OpenID Connect provider, or both. Each account has its
+		own fuseraft home, so its sessions, chats, memory, schedule and model profiles are its own.
+	</Card>
+	<Card title="Sessions and chats" icon="laptop">
+		Start multi-agent orchestration sessions and watch every turn and tool call stream in. Chat
+		with the same REPL engine as `fuseraft repl`, confined to a workspace.
+	</Card>
+	<Card title="Approvals in one place" icon="approve-check">
+		Every command, file write and handoff your sessions, chats and daemon tasks wait on, with a
+		diff for file writes and a badge count in the nav.
+	</Card>
+	<Card title="Daemons on other machines" icon="rocket">
+		Attach to `fuseraft serve` over TLS, send it tasks and answer their approvals. Admins choose
+		who may use each daemon, and a read-only token makes one watch-only.
+	</Card>
+	<Card title="Restarts don't end work" icon="random">
+		Sessions and chats run in relay processes that outlive the server. Restart or upgrade
+		fuseraft-web and the next one picks everything back up, approvals included.
+	</Card>
+	<Card title="A wire protocol, not a library" icon="puzzle">
+		fuseraft-web runs the `fuseraft` CLI and speaks its versioned wire protocol, so a fuseraft
+		upgrade can't break its build, and a mismatched version is reported, not misread.
+	</Card>
+</CardGrid>

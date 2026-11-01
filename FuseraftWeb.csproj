@@ -25,9 +25,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Remove="tests/**;artifacts/**" />
-    <Content Remove="tests/**;artifacts/**" />
-    <None Remove="tests/**;artifacts/**" />
+    <Compile Remove="tests/**;artifacts/**;docs/**" />
+    <Content Remove="tests/**;artifacts/**;docs/**" />
+    <None Remove="tests/**;artifacts/**;docs/**" />
   </ItemGroup>
 
 </Project>
