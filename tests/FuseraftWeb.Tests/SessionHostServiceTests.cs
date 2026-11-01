@@ -46,8 +46,8 @@ public sealed class SessionHostServiceTests : IDisposable
         var id = await host.StartSessionAsync(Alice, "Build it", "/w/o.yaml", "/w");
 
         Assert.Equal("abcd1234", id);
-        Assert.Equal(["run", "--bridge", "-c", "/w/o.yaml", "Build it"], _cli.Started[0].Args);
-        Assert.Equal("/w", _cli.Started[0].Cwd);
+        Assert.Equal(["run", "--bridge", "-c", Path.GetFullPath("/w/o.yaml"), "Build it"], _cli.Started[0].Args);
+        Assert.Equal(Path.GetFullPath("/w"), _cli.Started[0].Cwd);
         Assert.Equal([Alice.Home], _cli.Homes.Distinct());
 
         bridge.Send(new { type = "agent_starting", agent = "Dev" })
@@ -205,7 +205,7 @@ public sealed class SessionHostServiceTests : IDisposable
         var dir = Directory.CreateTempSubdirectory().FullName;
         try
         {
-            var host = Host($$"""{"protocolVersion":1,"items":[{"sessionId":"abcd1234","task":"t","workingDirectory":"{{dir}}","isComplete":false}]}""");
+            var host = Host($$"""{"protocolVersion":1,"items":[{"sessionId":"abcd1234","task":"t","workingDirectory":{{System.Text.Json.JsonSerializer.Serialize(dir)}},"isComplete":false}]}""");
             await host.EnsureHistoryAsync(Alice);
             _cli.Responses["sessions --show abcd1234 --json"] =
                 """{"protocolVersion":1,"item":{"sessionId":"abcd1234","task":"t","isComplete":false,"messages":[{"agentName":"Dev","content":"halfway"}]}}""";

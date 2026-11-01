@@ -17,7 +17,7 @@ public sealed class OrchestrationTemplateServiceTests
         var result = await new OrchestrationTemplateService(cli, WorkspaceAccess.Unrestricted).GenerateAsync("/w", "solo", "o.yaml", "gpt-4o", "", force: true);
 
         Assert.Equal("/w/.fuseraft/config/o.yaml", result.ConfigPath);
-        Assert.Equal("/w", Assert.Single(cli.Queries).Cwd);
+        Assert.Equal(Path.GetFullPath("/w"), Assert.Single(cli.Queries).Cwd);
     }
 
     [Fact]

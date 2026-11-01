@@ -11,7 +11,7 @@ public sealed class ScheduleServiceTests
         var cli = new FakeCli();
         await new ScheduleService(cli, WorkspaceAccess.Unrestricted).AddJobAsync("nightly", "0 2 * * *", "Audit", configPath: "", description: "d", workDir: "/w");
         Assert.Equal(
-            ["schedule", "add", "nightly", "--cron", "0 2 * * *", "--task", "Audit", "--description", "d", "--work-dir", "/w"],
+            ["schedule", "add", "nightly", "--cron", "0 2 * * *", "--task", "Audit", "--description", "d", "--work-dir", Path.GetFullPath("/w")],
             Assert.Single(cli.Runs));
     }
 

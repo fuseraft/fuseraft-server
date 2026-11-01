@@ -31,7 +31,7 @@ public sealed class WorkspaceAccessTests
     {
         var access = WorkspaceAccess.For(User(false, "/srv/bob"));
 
-        Assert.Equal("/srv/bob/w/o.yaml", access.Check("o.yaml", "/srv/bob/w"));
+        Assert.Equal(Path.GetFullPath("/srv/bob/w/o.yaml"), access.Check("o.yaml", "/srv/bob/w"));
         Assert.Throws<UnauthorizedAccessException>(() => access.Check("../../../etc/x", "/srv/bob/w"));
     }
 
