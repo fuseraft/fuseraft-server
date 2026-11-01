@@ -37,9 +37,19 @@ if (!OperatingSystem.IsWindows())
     File.SetUnixFileMode(web.ResolvedDataDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
 
 // Persisted so sign-ins survive a restart.
-builder.Services.AddDataProtection()
+var keysDirectory  = Path.Combine(web.ResolvedDataDirectory, "keys");
+var dataProtection = builder.Services.AddDataProtection()
     .SetApplicationName("fuseraft-web")
-    .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(web.ResolvedDataDirectory, "keys")));
+    .PersistKeysToFileSystem(new DirectoryInfo(keysDirectory));
+if (!string.IsNullOrWhiteSpace(web.KeyCertificate))
+{
+    var keyCertificate = WebOptions.LoadKeyCertificate(web.KeyCertificate,
+        Environment.GetEnvironmentVariable(WebOptions.KeyCertificatePasswordVariable));
+    // Keys aren't looked up in a certificate store on Linux, so name the certificate for decrypting too.
+    dataProtection.ProtectKeysWithCertificate(keyCertificate).UnprotectKeysWithAnyCertificate(keyCertificate);
+}
+else if (OperatingSystem.IsWindows())
+    dataProtection.ProtectKeysWithDpapi();
 
 var authentication = builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
@@ -81,7 +91,10 @@ builder.Services.AddSingleton<SessionHostService>();
 builder.Services.AddSingleton<PluginCatalogService>();
 builder.Services.AddSingleton<ModelProfileRegistry>();
 builder.Services.AddSingleton<ReplService>();
+builder.Services.AddSingleton(sp => new DaemonStore(Path.Combine(web.ResolvedDataDirectory, "daemons.json"),
+    sp.GetRequiredService<IDataProtectionProvider>(), sp.GetRequiredService<ILogger<DaemonStore>>()));
 builder.Services.AddSingleton<DaemonService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<DaemonService>());
 builder.Services.AddHostedService<ScheduleTicker>();
 builder.Services.AddHostedService<RelayAdopter>();
 
@@ -95,6 +108,10 @@ builder.Services.AddScoped(sp => sp.GetRequiredService<ModelProfileRegistry>().F
 builder.Services.AddScoped<WorkspaceService>();
 
 var app = builder.Build();
+if (string.IsNullOrWhiteSpace(web.KeyCertificate) && !OperatingSystem.IsWindows())
+    app.Logger.LogInformation("The data-protection keys in {Keys} aren't encrypted, so anyone who can read them can forge sign-ins " +
+        "and decrypt saved daemon tokens; the directory is readable only by this user. Set Fuseraft:KeyCertificate to encrypt them.",
+        keysDirectory);
 
 if (!app.Environment.IsDevelopment())
     app.UseHsts();

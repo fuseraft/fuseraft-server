@@ -1,5 +1,6 @@
 @implements IDisposable
 @inject HitlBroker Broker
+@inject DaemonService Daemons
 
 <nav class="sidenav">
     <div class="nav-logo">
@@ -20,7 +21,7 @@
             <span class="nav-icon">⬡</span>
             <span>Builder</span>
         </NavLink>
-        @if (Current.User.IsAdmin)
+        @if (Current.User.IsAdmin || Daemons.For(Current.User).Count > 0)
         {
             <NavLink href="/daemons" class="nav-item">
                 <span class="nav-icon">⇄</span>

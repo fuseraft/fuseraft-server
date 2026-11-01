@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+
 namespace fuseraft.Web.Services.Users;
 
 /// <summary>The <c>Auth</c> section: how people sign in and where new accounts may work.</summary>
@@ -45,7 +48,35 @@ public sealed class WebOptions
     /// <summary>Tick every user's <c>fuseraft schedule run</c> once a minute, so scheduled jobs run without cron.</summary>
     public bool RunSchedules { get; set; } = true;
 
+    /// <summary>
+    /// A .pfx whose key encrypts the data-protection keys in <c>keys/</c> (which sign cookies and encrypt saved daemon
+    /// tokens). Its password comes from <see cref="KeyCertificatePasswordVariable"/>. Keep it somewhere other than the
+    /// data directory, such as a mounted secret, so a copy of that directory alone can't decrypt anything.
+    /// Without one, the keys are encrypted with DPAPI on Windows and stored unencrypted elsewhere.
+    /// </summary>
+    public string? KeyCertificate { get; set; }
+
+    public const string KeyCertificatePasswordVariable = "FUSERAFT_WEB_KEY_CERT_PASSWORD";
+
     public string ResolvedDataDirectory => ExpandHome(DataDirectory);
+
+    /// <summary>Loads <see cref="KeyCertificate"/>, or throws with a message that says what's wrong with it.</summary>
+    public static X509Certificate2 LoadKeyCertificate(string path, string? password)
+    {
+        var full = ExpandHome(path);
+        if (!File.Exists(full)) throw new InvalidOperationException($"Fuseraft:KeyCertificate {full} doesn't exist.");
+        X509Certificate2 cert;
+        try { cert = X509CertificateLoader.LoadPkcs12FromFile(full, password); }
+        catch (CryptographicException ex)
+        {
+            throw new InvalidOperationException(
+                $"Couldn't load Fuseraft:KeyCertificate {full} (is {KeyCertificatePasswordVariable} set?): {ex.Message}", ex);
+        }
+        if (!cert.HasPrivateKey) throw new InvalidOperationException($"Fuseraft:KeyCertificate {full} has no private key.");
+        // XML encryption, which data protection uses for keys, only takes RSA.
+        if (cert.GetRSAPublicKey() is null) throw new InvalidOperationException($"Fuseraft:KeyCertificate {full} must have an RSA key.");
+        return cert;
+    }
 
     internal static string ExpandHome(string path)
     {

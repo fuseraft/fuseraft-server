@@ -1,12 +1,16 @@
 using System.Net.WebSockets;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using fuseraft.Web.Models;
 
 namespace fuseraft.Web.Services.Daemons;
 
 /// <summary>A line-oriented connection to a daemon's attach endpoint.</summary>
 public interface IDaemonTransport : IAsyncDisposable
 {
-    Task ConnectAsync(Uri url, string? token, CancellationToken cancellationToken);
+    /// <param name="clientId">Sent so the daemon keeps this server's tasks across reconnects.</param>
+    Task ConnectAsync(DaemonEndpoint endpoint, string clientId, CancellationToken cancellationToken);
 
     Task SendLineAsync(string line, CancellationToken cancellationToken);
 
@@ -18,18 +22,36 @@ public interface IDaemonTransport : IAsyncDisposable
 public sealed class WebSocketDaemonTransport : IDaemonTransport
 {
     private const int MaxMessageBytes = 4 << 20;
+    public const string ClientIdHeader = "Fuseraft-Client-Id";
 
     private readonly ClientWebSocket _socket = new();
     // Approval answers and dispatches come from different flows; a WebSocket allows one send at a time.
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly Queue<string> _pending = new();
 
-    public async Task ConnectAsync(Uri url, string? token, CancellationToken cancellationToken)
+    public async Task ConnectAsync(DaemonEndpoint endpoint, string clientId, CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrEmpty(token))
-            _socket.Options.SetRequestHeader("Authorization", "Bearer " + token);
-        await _socket.ConnectAsync(url, cancellationToken);
+        if (!string.IsNullOrEmpty(endpoint.Token))
+            _socket.Options.SetRequestHeader("Authorization", "Bearer " + endpoint.Token);
+        _socket.Options.SetRequestHeader(ClientIdHeader, clientId);
+        // Pings notice a daemon that vanished without closing, so the reconnect starts within its grace period.
+        _socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+        _socket.Options.KeepAliveTimeout  = TimeSpan.FromSeconds(30);
+        if (NormalizeFingerprint(endpoint.CertificateSha256) is { } pinned)
+            _socket.Options.RemoteCertificateValidationCallback = (_, cert, _, _) =>
+                cert is not null && Fingerprint(cert) == pinned;
+        await _socket.ConnectAsync(new Uri(endpoint.Url), cancellationToken);
     }
+
+    /// <summary>A fingerprint as 64 upper-case hex digits, from any of the usual spellings; null when it isn't one.</summary>
+    public static string? NormalizeFingerprint(string? fingerprint)
+    {
+        if (string.IsNullOrWhiteSpace(fingerprint)) return null;
+        var hex = new string([.. fingerprint.Where(c => c is not (':' or ' ' or '-'))]).ToUpperInvariant();
+        return hex.Length == 64 && hex.All(Uri.IsHexDigit) ? hex : null;
+    }
+
+    private static string Fingerprint(X509Certificate cert) => Convert.ToHexString(SHA256.HashData(cert.GetRawCertData()));
 
     public async Task SendLineAsync(string line, CancellationToken cancellationToken)
     {

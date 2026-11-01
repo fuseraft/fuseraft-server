@@ -1,14 +1,17 @@
 @page "/daemons"
-@attribute [Authorize(Roles = UserClaims.AdminRole)]
 @implements IDisposable
 @inject DaemonService DaemonService
 @inject HitlBroker Broker
+@inject UserStore Users
 
 <PageTitle>Daemons — Fuseraft</PageTitle>
 
 <div class="page-header">
     <h1>Daemons</h1>
-    <button class="btn btn-primary" @onclick="OpenAdd">+ Add Daemon</button>
+    @if (IsAdmin)
+    {
+        <button class="btn btn-primary" @onclick="OpenAdd">+ Add Daemon</button>
+    }
 </div>
 
 <p class="muted" style="margin-bottom:16px">
@@ -30,14 +33,24 @@
             </div>
             <div class="form-group">
                 <label class="form-label">Attach URL</label>
-                <input @bind="_addUrl" class="input" placeholder="ws://build-box.lan:24601/attach" />
+                <input @bind="_addUrl" @bind:event="oninput" class="input" placeholder="wss://build-box.lan:24601/attach" />
                 <p class="form-hint"><code>fuseraft serve</code> prints it as "Attach WebSocket".</p>
+                @if (new DaemonEndpoint { Url = _addUrl.Trim() }.Unencrypted)
+                {
+                    <p class="form-hint text-warn">⚠ ws:// to another machine is unencrypted: the token and every task can be read
+                        on the network. Start the daemon with <code>--tls-cert</code> and use wss://.</p>
+                }
             </div>
             <div class="form-group">
                 <label class="form-label">Token <span class="form-optional">(optional)</span></label>
                 <input @bind="_addToken" class="input" type="password" autocomplete="off" />
-                <p class="form-hint">The daemon's <code>FUSERAFT_SERVE_TOKEN</code>. Kept in memory until this server stops;
-                    add daemons to <code>Fuseraft:Daemons</code> to keep them.</p>
+                <p class="form-hint">The daemon's <code>FUSERAFT_SERVE_TOKEN</code>. Saved encrypted in this server's data directory.</p>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Certificate SHA-256 <span class="form-optional">(optional)</span></label>
+                <input @bind="_addPin" class="input mono" autocomplete="off" placeholder="3A:9F:…" />
+                <p class="form-hint">For a self-signed certificate: the fingerprint <code>fuseraft serve --tls-cert</code> prints.
+                    Leave it empty for a certificate from a CA this server trusts.</p>
             </div>
             @if (_addError is not null)
             {
@@ -55,8 +68,16 @@
 {
     <div class="empty-state">
         <div class="empty-icon">⇄</div>
-        <p>No daemons yet.</p>
-        <p class="muted">Start one with <code>fuseraft serve</code>, then add its attach URL here.</p>
+        @if (IsAdmin)
+        {
+            <p>No daemons yet.</p>
+            <p class="muted">Start one with <code>fuseraft serve</code>, then add its attach URL here.</p>
+        }
+        else
+        {
+            <p>No daemons have been shared with you.</p>
+            <p class="muted">An admin can give you access to one from this page.</p>
+        }
     </div>
 }
 else
@@ -68,27 +89,37 @@ else
         <tbody>
             @foreach (var c in _connections)
             {
-                <tr class="clickable" @key="c.Id" @onclick="() => _selected = c.Id"
+                <tr class="clickable" @key="c.Id" @onclick="() => Select(c.Id)"
                     style="@(c.Id == _selected ? "background:var(--surface2)" : "")">
                     <td><strong>@c.Endpoint.Name</strong></td>
-                    <td class="mono small">@c.Endpoint.Url</td>
+                    <td class="mono small">
+                        @c.Endpoint.Url
+                        @if (c.ReadOnly)
+                        {
+                            <span class="status-badge badge-muted" title="This server's token for the daemon can watch, but not send tasks.">read-only</span>
+                        }
+                        @if (c.Endpoint.Unencrypted)
+                        {
+                            <span class="status-badge badge-warn" title="The token and every task travel unencrypted. Use --tls-cert and wss://.">unencrypted</span>
+                        }
+                    </td>
                     <td>
                         <span class="status-badge @BadgeClass(c)">@BadgeLabel(c)</span>
-                        @if (c.State == DaemonState.Disconnected && c.Error is not null)
+                        @if (c.State is DaemonState.Disconnected or DaemonState.Reconnecting && c.Error is not null)
                         {
                             <div class="muted small">@c.Error</div>
                         }
                     </td>
                     <td class="nowrap" @onclick:stopPropagation>
-                        @if (c.State == DaemonState.Disconnected)
+                        @if (IsAdmin && c.State is DaemonState.Disconnected or DaemonState.Reconnecting)
                         {
-                            <button class="btn btn-sm" @onclick="() => ConnectAsync(c)">Connect</button>
+                            <button class="btn btn-sm" @onclick="() => ConnectAsync(c)">@(c.State == DaemonState.Reconnecting ? "Retry now" : "Connect")</button>
                         }
-                        else
+                        @if (IsAdmin && c.State != DaemonState.Disconnected)
                         {
-                            <button class="btn btn-sm" @onclick="() => c.DisconnectAsync()">Disconnect</button>
+                            <button class="btn btn-sm" @onclick="() => DaemonService.DisconnectAsync(c)">Disconnect</button>
                         }
-                        @if (!c.Configured)
+                        @if (IsAdmin && !c.Configured)
                         {
                             <button class="btn btn-sm btn-danger" @onclick="() => DaemonService.RemoveAsync(c.Id)">Remove</button>
                         }
@@ -103,18 +134,52 @@ else
 {
     <h2 style="margin-bottom:12px">@d.Endpoint.Name</h2>
 
+    @if (d.State == DaemonState.Connected && !d.SupportsReconnect)
+    {
+        <div class="error-banner">This daemon runs a fuseraft older than v1.14.0. If the connection drops, a pending approval
+            is decided by its <code>--unattended-policy</code> and results that finish meanwhile are lost. Upgrade fuseraft
+            on the daemon's machine.</div>
+    }
+
+    @if (IsAdmin)
+    {
+        <div class="form-group">
+            <label class="form-label">Who else may use it</label>
+            @if (d.Configured)
+            {
+                <p class="form-hint">@(d.Endpoint.Users.Count == 0 ? "Admins only." : string.Join(", ", d.Endpoint.Users))
+                    Set <code>Users</code> for it in <code>Fuseraft:Daemons</code> to change this.</p>
+            }
+            else
+            {
+                <input class="input" @bind="_usersText" placeholder="alice, bob" />
+                <p class="form-hint">Usernames of non-admins who may send it tasks and answer their own tasks' approvals.
+                    Each sees only their own tasks, but the activity feed shows every task's progress. Admins always may.</p>
+                @if (_usersError is not null) { <div class="error-banner">@_usersError</div> }
+                <button class="btn btn-sm" @onclick="() => SaveUsers(d)">Save access</button>
+            }
+        </div>
+    }
+
     @foreach (var req in _approvals)
     {
         <ApprovalCard @key="req.Id" Request="req" ShowSource="false" />
     }
 
+    @if (d.ReadOnly)
+    {
+        <p class="muted">This server's token for the daemon is read-only, so you can follow its progress here but not send
+            it tasks. The daemon's <code>--tokens-file</code> gives a token full access without <code>read</code> after it.</p>
+    }
+    else
+    {
     <div class="form-group">
         <label class="form-label">Task</label>
         <textarea @bind="_task" @bind:event="oninput" rows="3" class="input" disabled="@(d.State != DaemonState.Connected)"
                   placeholder="What should the daemon's team do?"></textarea>
         @if (d.State == DaemonState.Connected && !d.CanDispatch)
         {
-            <p class="form-hint">Waiting for your last task to finish. The daemon takes one task at a time from each connection.</p>
+            <p class="form-hint">Waiting for the last task sent from this server to finish. The daemon takes one task at a time from each connection.</p>
         }
     </div>
     @if (_dispatchError is not null)
@@ -123,16 +188,17 @@ else
     }
     <button class="btn btn-primary" @onclick="() => DispatchAsync(d)"
             disabled="@(!d.CanDispatch || string.IsNullOrWhiteSpace(_task))">Send Task</button>
+    }
 
-    @if (d.Tasks.Count > 0)
+    @if (d.TasksFor(Current.User) is { Count: > 0 } tasks)
     {
-        <div class="orch-section-label" style="margin-top:24px; margin-bottom:8px">Your tasks</div>
+        <div class="orch-section-label" style="margin-top:24px; margin-bottom:8px">@(IsAdmin ? "Tasks from this server" : "Your tasks")</div>
         <table class="data-table">
             <thead>
                 <tr><th>Session</th><th>Task</th><th>Status</th><th>Result</th></tr>
             </thead>
             <tbody>
-                @foreach (var t in d.Tasks)
+                @foreach (var t in tasks)
                 {
                     <tr @key="t.SessionId">
                         <td class="id-cell">@t.SessionId</td>
@@ -175,22 +241,51 @@ else
     private string  _addName  = string.Empty;
     private string  _addUrl   = string.Empty;
     private string  _addToken = string.Empty;
+    private string  _addPin   = string.Empty;
     private string? _addError;
 
-    private DaemonConnection? Selected => _selected is { } id ? DaemonService.Get(id) : null;
+    private string  _usersText = string.Empty;
+    private string? _usersError;
+
+    private bool IsAdmin => Current.User.IsAdmin;
+
+    private DaemonConnection? Selected =>
+        _selected is { } id && DaemonService.Get(id) is { } c && c.Endpoint.Allows(Current.User) ? c : null;
 
     protected override void OnInitialized()
     {
         DaemonService.Changed       += OnChanged;
         Broker.PendingChanged += OnChanged;
         Refresh();
-        _selected = _connections.FirstOrDefault()?.Id;
+        Select(_connections.FirstOrDefault()?.Id);
+    }
+
+    private void Select(Guid? id)
+    {
+        _selected   = id;
+        _usersError = null;
+        Refresh();
+        _usersText = Selected is { } d ? string.Join(", ", d.Endpoint.Users) : string.Empty;
+    }
+
+    private void SaveUsers(DaemonConnection d)
+    {
+        if (!IsAdmin) return;
+        var names   = _usersText.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var unknown = names.Where(n => Users.FindByName(n) is null).ToList();
+        if (unknown.Count > 0)
+        {
+            _usersError = $"No account named {string.Join(", ", unknown.Select(n => $"'{n}'"))}.";
+            return;
+        }
+        _usersError = null;
+        DaemonService.SetUsers(d, names);
     }
 
     private void Refresh()
     {
         foreach (var c in _connections) c.Changed -= OnChanged;
-        _connections = [.. DaemonService.Connections];
+        _connections = [.. DaemonService.For(Current.User)];
         foreach (var c in _connections) c.Changed += OnChanged;
         if (_selected is { } id && _connections.All(c => c.Id != id)) _selected = _connections.FirstOrDefault()?.Id;
         var name = Selected?.Endpoint.Name;
@@ -203,30 +298,31 @@ else
     {
         _showAdd  = true;
         _addError = null;
-        _addName  = _addUrl = _addToken = string.Empty;
+        _addName  = _addUrl = _addToken = _addPin = string.Empty;
     }
 
     private void CloseAdd() => _showAdd = false;
 
     private async Task AddAsync()
     {
-        if (DaemonService.Validate(_addName, _addUrl) is { } problem)
+        if (!IsAdmin) return;
+        if (DaemonService.Validate(_addName, _addUrl, _addPin) is { } problem)
         {
             _addError = problem;
             return;
         }
-        var connection = DaemonService.Add(_addName, _addUrl, _addToken);
+        var connection = DaemonService.Add(_addName, _addUrl, _addToken, _addPin);
         _addToken = string.Empty;
         _showAdd  = false;
-        _selected = connection.Id;
-        Refresh();
-        await connection.ConnectAsync();
+        Select(connection.Id);
+        await DaemonService.ConnectAsync(connection);
     }
 
     private async Task ConnectAsync(DaemonConnection c)
     {
-        _selected = c.Id;
-        await c.ConnectAsync();
+        if (!IsAdmin) return;
+        Select(c.Id);
+        await DaemonService.ConnectAsync(c);
     }
 
     private async Task DispatchAsync(DaemonConnection d)
@@ -234,7 +330,7 @@ else
         _dispatchError = null;
         try
         {
-            await d.DispatchAsync(_task.Trim());
+            await d.DispatchAsync(_task.Trim(), Current.User.Id);
             _task = string.Empty;
         }
         catch (Exception ex) { _dispatchError = ex.Message; }
@@ -242,32 +338,38 @@ else
 
     private static string BadgeLabel(DaemonConnection c) => c.State switch
     {
-        DaemonState.Connected  => "● Connected",
-        DaemonState.Connecting => "● Connecting",
-        _                      => c.Error is null ? "Disconnected" : "✗ Disconnected",
+        DaemonState.Connected    => "● Connected",
+        DaemonState.Connecting   => "● Connecting",
+        DaemonState.Reconnecting => c.NextAttempt is { } at
+            ? $"↻ Retrying at {at.LocalDateTime:HH:mm:ss}"
+            : "↻ Reconnecting",
+        _                        => c.Error is null ? "Disconnected" : "✗ Disconnected",
     };
 
     private static string BadgeClass(DaemonConnection c) => c.State switch
     {
-        DaemonState.Connected  => "badge-ok",
-        DaemonState.Connecting => "badge-blue badge-pulse",
-        _                      => c.Error is null ? "badge-muted" : "badge-err",
+        DaemonState.Connected    => "badge-ok",
+        DaemonState.Connecting   => "badge-blue badge-pulse",
+        DaemonState.Reconnecting => "badge-warn",
+        _                        => c.Error is null ? "badge-muted" : "badge-err",
     };
 
     private static string TaskLabel(DaemonTask t) => t.Status switch
     {
-        DaemonTaskStatus.Queued    => "● In progress",
-        DaemonTaskStatus.Succeeded => "✓ Complete",
-        DaemonTaskStatus.Failed    => "✗ Failed",
-        _                          => "? Lost",
+        DaemonTaskStatus.Queued       => "● In progress",
+        DaemonTaskStatus.Succeeded    => "✓ Complete",
+        DaemonTaskStatus.Failed       => "✗ Failed",
+        DaemonTaskStatus.Reconnecting => "↻ Reconnecting",
+        _                             => "? Lost",
     };
 
     private static string TaskBadgeClass(DaemonTask t) => t.Status switch
     {
-        DaemonTaskStatus.Queued    => "badge-blue badge-pulse",
-        DaemonTaskStatus.Succeeded => "badge-ok",
-        DaemonTaskStatus.Failed    => "badge-err",
-        _                          => "badge-muted",
+        DaemonTaskStatus.Queued       => "badge-blue badge-pulse",
+        DaemonTaskStatus.Succeeded    => "badge-ok",
+        DaemonTaskStatus.Failed       => "badge-err",
+        DaemonTaskStatus.Reconnecting => "badge-warn",
+        _                             => "badge-muted",
     };
 
     public void Dispose()

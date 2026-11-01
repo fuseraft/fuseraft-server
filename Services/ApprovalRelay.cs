@@ -14,9 +14,10 @@ public sealed class ApprovalRelay(HitlBroker broker, TextWriter input, ApprovalS
     private readonly Lock _gate = new();
     private Task _last = Task.CompletedTask;
 
-    public PendingApproval Handle(string sessionId, JsonElement approvalRequest)
+    /// <param name="requestOwnerId">Who may answer this request, when it isn't the relay's owner.</param>
+    public PendingApproval Handle(string sessionId, JsonElement approvalRequest, string? requestOwnerId = null)
     {
-        var request = broker.Enqueue(PendingApproval.FromEvent(sessionId, source, approvalRequest, origin, ownerId));
+        var request = broker.Enqueue(PendingApproval.FromEvent(sessionId, source, approvalRequest, origin, requestOwnerId ?? ownerId));
         lock (_gate) _last = RespondInOrderAsync(_last, request);
         return request;
     }
