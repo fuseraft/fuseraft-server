@@ -36,7 +36,8 @@ Every page needs a signed-in account. People sign in with a username and passwor
 | Other people's sessions and approvals | | see and act on them |
 | Other people's REPL chats | | |
 | Workspaces | only under their workspace roots | anywhere |
-| Users and Daemons pages | | ✓ |
+| Daemons | the ones an admin shares with them | all, and adds and connects them |
+| Users page | | ✓ |
 
 A non-admin's **workspace roots** (by default `<data>/workspaces/<name>`; admins change them on the Users page) bound the directories they can pick, run sessions and chats in, and point configs at.
 
@@ -103,20 +104,27 @@ Sessions and chats run in relay processes that outlive fuseraft-web. Restart it,
 ### HITL (Human-in-the-Loop)
 Every approval your sessions, chats and daemon tasks are waiting on, in one place, with a badge count in the nav. Shell commands show the command, file writes show a diff, and agent handoffs show who hands off to whom.
 
-### Daemons (admins)
+### Daemons
 <img src="docs/screenshots/daemons.png" alt="The Daemons page: a connected daemon asking to run npm test, with Approve and Deny buttons">
 
-Attach to a running `fuseraft serve`, on this machine or another, over its attach WebSocket. Send it tasks, follow every task's live progress, and answer approvals for the tasks you sent. Daemons added on the page last until the server stops; list permanent ones in `appsettings.json`:
+Attach to a running `fuseraft serve`, on this machine or another, over its attach WebSocket. Send it tasks, follow every task's live progress, and answer approvals for the tasks you sent. Daemons connect when the server starts and reconnect after a dropped connection, with backoff. Daemons added on the page are saved in the data directory, with their tokens encrypted; list the ones you manage as configuration in `appsettings.json`:
 
 ```json
 "Fuseraft": {
   "Daemons": [
-    { "Name": "build-box", "Url": "ws://build-box.lan:24601/attach" }
+    { "Name": "build-box", "Url": "wss://build-box.lan:24601/attach",
+      "CertificateSha256": "3A:9F:…", "Users": ["alice"] }
   ]
 }
 ```
 
-Set a daemon's token in the environment rather than the file: `Fuseraft__Daemons__0__Token=<the daemon's FUSERAFT_SERVE_TOKEN>`.
+Set a daemon's token in the environment rather than the file: `Fuseraft__Daemons__0__Token=<the daemon's token>`. `"AutoConnect": false` leaves one disconnected until someone presses Connect. Give this server a token of its own with the daemon's `--tokens-file`, so you can revoke it without touching the daemon's other clients. A `read` token there makes the daemon watch-only from here: the page shows its progress, marked *read-only*, with no task box.
+
+**Who can use a daemon.** Admins add, connect and remove daemons, and see every task. To let non-admins use one, list their usernames: `"Users": ["alice", "bob"]` in configuration, or the *Who else may use it* field on the page for one added there. Those users see the daemon, send it tasks, and see and approve only their own tasks; the activity feed still shows every task's progress. Everyone else doesn't see it at all. Who sent each unfinished task is kept in the data directory, so its approvals still go to them after a restart.
+
+**Use `wss://` to another machine.** Start the daemon with `--tls-cert` (fuseraft v1.14.0 or later). A certificate from a CA this server trusts needs nothing more. For a self-signed one, set `CertificateSha256` to the fingerprint `fuseraft serve` prints. A plain `ws://` URL to another machine is marked *unencrypted* on the page and logged at startup, since the token and every task cross the network readable.
+
+**Restarts on either side.** fuseraft-web attaches with a client id it keeps in the data directory. When the connection drops (a restart of fuseraft-web, a network blip), the daemon keeps running the task and waits up to its `--reconnect-grace` (60 seconds by default) for an answer to a pending approval. On reconnect it asks again, and sends the results of tasks that finished meanwhile. If the daemon itself restarts, it resumes the running task from its saved session and runs the queued ones, so after reconnecting the task carries on and its approval is asked again. A daemon older than fuseraft v1.14.0 ignores the client id: the page warns about it, and there a dropped connection still loses the pending approval and a daemon restart loses the task.
 
 ### Schedule
 Add, enable, disable and remove `fuseraft schedule` jobs. fuseraft-web runs every account's due jobs once a minute (`Fuseraft:RunSchedules`), so no cron entry is needed. **Run** starts a job now as a live session with approvals.
@@ -135,7 +143,8 @@ Settings come from `appsettings.json` next to the binary, or from environment va
 | `Fuseraft:Binary` | `fuseraft` | The fuseraft CLI: a path, or a name on `PATH` |
 | `Fuseraft:DataDirectory` | `~/.fuseraft-web` | Accounts, cookie-signing keys, and new accounts' homes and workspaces (mode 700) |
 | `Fuseraft:RunSchedules` | `true` | Run every account's due scheduled jobs once a minute |
-| `Fuseraft:Daemons` | | `fuseraft serve` daemons to attach to (admins) |
+| `Fuseraft:Daemons` | | `fuseraft serve` daemons to attach to, and the non-admins who may use each |
+| `Fuseraft:KeyCertificate` | | A `.pfx` with an RSA key that encrypts the data-protection keys; password in `FUSERAFT_WEB_KEY_CERT_PASSWORD`. See [docs/deploying.md](docs/deploying.md#what-to-back-up) |
 | `Auth:LocalAccounts` | `true` | Username and password sign-in |
 | `Auth:SessionHours` | `12` | How long a sign-in lasts without activity |
 | `Auth:DefaultWorkspaceRoot` | `{data}/workspaces/{user}` | A new non-admin's workspace root |
@@ -148,7 +157,7 @@ To serve other machines, put fuseraft-web behind a TLS reverse proxy: see [docs/
 
 ## Requirements
 
-- The `fuseraft` CLI, v1.13.0 or later (wire protocol version 1). On `PATH`, or set `Fuseraft:Binary`. The Daemons page needs daemons on v1.13.0 or later too, for the attach WebSocket.
+- The `fuseraft` CLI, v1.13.0 or later (wire protocol version 1). On `PATH`, or set `Fuseraft:Binary`. The Daemons page needs daemons on v1.13.0 or later too, for the attach WebSocket, and v1.14.0 or later for `wss://`, for picking tasks up again after a reconnect, and for keeping them across a daemon restart. With a v1.13.0 daemon, a dropped connection still loses the task's pending approval, and the page says so.
 - Linux: `secret-tool` (from `libsecret-tools`) to keep API keys in the keychain; otherwise they fall back to mode-600 files.
 - Release archives are self-contained. Building from source needs the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
