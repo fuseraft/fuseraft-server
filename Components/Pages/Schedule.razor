@@ -141,7 +141,7 @@
 
         try
         {
-            var sessionId = await SessionService.StartSessionAsync(
+            var sessionId = await SessionService.StartSessionAsync(Current.User, 
                 job.Task,
                 job.Config ?? ".fuseraft/config/orchestration.yaml",
                 job.WorkDir ?? string.Empty);

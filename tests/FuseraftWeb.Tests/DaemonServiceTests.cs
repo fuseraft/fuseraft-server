@@ -1,8 +1,8 @@
-using fuseraft.Server.Models;
-using fuseraft.Server.Services;
-using fuseraft.Server.Services.Daemons;
+using fuseraft.Web.Models;
+using fuseraft.Web.Services;
+using fuseraft.Web.Services.Daemons;
 
-namespace FuseraftServer.Tests;
+namespace FuseraftWeb.Tests;
 
 public sealed class DaemonServiceTests
 {

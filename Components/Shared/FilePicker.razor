@@ -1,9 +1,10 @@
 @using System.IO
+@inject WorkspaceAccess Access
 
 <div class="dir-picker file-picker">
     <div class="dir-picker-nav">
         <button class="btn btn-sm" @onclick="GoUp"
-                disabled="@(_current == Path.GetPathRoot(_current))">↑ Up</button>
+                disabled="@(!Access.CanLeave(_current))">↑ Up</button>
         <span class="dir-picker-current" title="@_current">@_current</span>
     </div>
 
@@ -62,9 +63,9 @@
 
     protected override void OnInitialized()
     {
-        var initial = !string.IsNullOrEmpty(InitialPath) && Directory.Exists(InitialPath)
+        var initial = !string.IsNullOrEmpty(InitialPath) && Directory.Exists(InitialPath) && Access.Allows(InitialPath)
             ? Path.GetFullPath(InitialPath)
-            : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            : Access.DefaultDirectory;
         _current = initial;
         Load();
     }
@@ -74,7 +75,7 @@
     private void GoUp()
     {
         var parent = Directory.GetParent(_current)?.FullName;
-        if (parent is not null) { _current = parent; _selected = null; Load(); }
+        if (parent is not null && Access.Allows(parent)) { _current = parent; _selected = null; Load(); }
     }
 
     private void SelectFile(string path) { _selected = path; }

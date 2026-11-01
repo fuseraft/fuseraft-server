@@ -1,0 +1,47 @@
+@page "/setup"
+@layout AuthLayout
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@inject UserStore Users
+
+<PageTitle>Set up — Fuseraft</PageTitle>
+
+<h1 class="auth-title">Create the first admin</h1>
+
+@if (!Users.IsEmpty || !Users.CheckSetupCode(Code))
+{
+    <p class="muted">Setup is finished, or this link's code is wrong. <a href="login">Sign in</a> instead.</p>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(Error))
+    {
+        <div class="error-banner">@Error</div>
+    }
+    <p class="muted">This account gets fuseraft's default home, so sessions, chats and profiles from before
+        accounts existed stay with it.</p>
+    <form method="post" action="account/setup">
+        <AntiforgeryToken />
+        <input type="hidden" name="code" value="@Code" />
+        <div class="form-group">
+            <label class="form-label" for="userName">Username</label>
+            <input class="input" id="userName" name="userName" autocomplete="username" required autofocus />
+        </div>
+        <div class="form-group">
+            <label class="form-label" for="password">Password</label>
+            <input class="input" id="password" name="password" type="password" autocomplete="new-password"
+                   minlength="@PasswordHashing.MinimumLength" required />
+            <div class="form-hint">At least @PasswordHashing.MinimumLength characters.</div>
+        </div>
+        <div class="form-group">
+            <label class="form-label" for="confirm">Password again</label>
+            <input class="input" id="confirm" name="confirm" type="password" autocomplete="new-password" required />
+        </div>
+        <button class="btn btn-primary auth-submit" type="submit">Create admin</button>
+    </form>
+}
+
+@code {
+    [SupplyParameterFromQuery] private string? Code  { get; set; }
+    [SupplyParameterFromQuery] private string? Error { get; set; }
+}

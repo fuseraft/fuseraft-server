@@ -1,7 +1,7 @@
-using fuseraft.Server.Services;
-using fuseraft.Server.Services.Cli;
+using fuseraft.Web.Services;
+using fuseraft.Web.Services.Cli;
 
-namespace fuseraft.Server.Models;
+namespace fuseraft.Web.Models;
 
 public sealed class ManagedSession
 {
@@ -9,6 +9,8 @@ public sealed class ManagedSession
     private readonly List<SessionEvent> _events = [];
 
     public required string   SessionId        { get; init; }
+    /// <summary>The account that started it, or whose fuseraft home it was found in.</summary>
+    public required string   OwnerId          { get; init; }
     public required string   Task             { get; init; }
     public required string   ConfigPath       { get; init; }
     public string?           WorkingDirectory { get; init; }

@@ -1,0 +1,146 @@
+@page "/users"
+@attribute [Authorize(Roles = UserClaims.AdminRole)]
+@implements IDisposable
+@inject UserStore Store
+@inject CurrentUser Current
+
+<PageTitle>Users — Fuseraft</PageTitle>
+
+<div class="page-header">
+    <h1>Users</h1>
+    <p class="muted">Each account has its own fuseraft home: sessions, chats, memory, schedule and model profiles.
+        Non-admins can only pick workspaces under their roots. Everyone's agents run as this server's OS user,
+        so accounts separate people who trust each other, not strangers.</p>
+</div>
+
+@if (_error is not null) { <div class="error-banner">@_error</div> }
+
+<div class="table-wrapper">
+    <table class="data-table users-table">
+        <thead>
+            <tr><th>User</th><th>Role</th><th>Sign-in</th><th>Workspaces</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var u in _users)
+            {
+                <tr>
+                    <td>
+                        <strong>@u.UserName</strong>
+                        @if (u.Disabled) { <span class="owner-pill">disabled</span> }
+                        <div class="muted mono" title="fuseraft home">@u.Home</div>
+                    </td>
+                    <td>@(u.IsAdmin ? "admin" : "user")</td>
+                    <td class="muted">
+                        @(u.PasswordHash is null ? "" : "password")
+                        @(u.Logins.Count > 0 ? $"{(u.PasswordHash is null ? "" : " + ")}sign-on" : "")
+                    </td>
+                    <td>
+                        @if (u.IsAdmin)
+                        {
+                            <span class="muted">anywhere</span>
+                        }
+                        else if (_editRootsId == u.Id)
+                        {
+                            <textarea class="input users-roots" @bind="_rootsText"></textarea>
+                            <div class="form-hint">One directory per line.</div>
+                            <button class="btn btn-sm btn-primary" @onclick="() => SaveRoots(u)">Save</button>
+                            <button class="btn btn-sm" @onclick="() => _editRootsId = null">Cancel</button>
+                        }
+                        else
+                        {
+                            @foreach (var r in u.WorkspaceRoots) { <div class="mono">@r</div> }
+                            <button class="btn btn-sm" @onclick="() => EditRoots(u)">Edit</button>
+                        }
+                    </td>
+                    <td class="row-actions">
+                        @if (_resetId == u.Id)
+                        {
+                            <input class="input" type="password" placeholder="New password" autocomplete="new-password" @bind="_resetPassword" />
+                            <button class="btn btn-sm btn-primary" @onclick="() => Run(() => Store.SetPassword(u.Id, _resetPassword), done: () => _resetId = null)">Set</button>
+                            <button class="btn btn-sm" @onclick="() => _resetId = null">Cancel</button>
+                        }
+                        else if (_deleteId == u.Id)
+                        {
+                            <span>Remove <strong>@u.UserName</strong>? Their home stays on disk.</span>
+                            <button class="btn btn-sm btn-danger" @onclick="() => Run(() => Store.Delete(u.Id), done: () => _deleteId = null)">Remove</button>
+                            <button class="btn btn-sm" @onclick="() => _deleteId = null">Cancel</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-sm" @onclick="() => { _resetId = u.Id; _resetPassword = string.Empty; }">Password</button>
+                            <button class="btn btn-sm" @onclick="() => Run(() => Store.Update(u.Id, x => x.IsAdmin = !x.IsAdmin))">@(u.IsAdmin ? "Make user" : "Make admin")</button>
+                            @if (u.Id != Current.User.Id)
+                            {
+                                <button class="btn btn-sm" @onclick="() => Run(() => Store.Update(u.Id, x => x.Disabled = !x.Disabled, signOut: !u.Disabled))">@(u.Disabled ? "Enable" : "Disable")</button>
+                                <button class="btn btn-sm btn-danger" @onclick="() => _deleteId = u.Id">Remove</button>
+                            }
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+<h2 class="section-title">Add an account</h2>
+<div class="card" style="max-width:560px">
+    <div class="card-body">
+        <div class="form-row-2">
+            <div class="form-group">
+                <label class="form-label">Username</label>
+                <input class="input" autocomplete="off" @bind="_newName" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Password</label>
+                <input class="input" type="password" autocomplete="new-password" @bind="_newPassword" />
+            </div>
+        </div>
+        <label><input type="checkbox" @bind="_newAdmin" /> Admin</label>
+        <div class="form-hint">To use single sign-on, they sign in with this password once and link it from their Account page.
+            With <code>Auth:Oidc:AutoProvision</code>, allowed emails get an account on first sign-on instead.</div>
+        <button class="btn btn-primary" style="margin-top:12px" @onclick="Add">Add account</button>
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<WebUser> _users = [];
+    private string? _error, _editRootsId, _resetId, _deleteId;
+    private string _rootsText = "", _resetPassword = "", _newName = "", _newPassword = "";
+    private bool _newAdmin;
+
+    protected override void OnInitialized()
+    {
+        _users = Store.All;
+        Store.Changed += OnChanged;
+    }
+
+    private void OnChanged() => InvokeAsync(() => { _users = Store.All; StateHasChanged(); });
+
+    public void Dispose() => Store.Changed -= OnChanged;
+
+    private void Run(Action action, Action? done = null)
+    {
+        _error = null;
+        try { action(); done?.Invoke(); }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { _error = ex.Message; }
+        _users = Store.All;
+    }
+
+    private void EditRoots(WebUser u)
+    {
+        _editRootsId = u.Id;
+        _rootsText   = string.Join('\n', u.WorkspaceRoots);
+    }
+
+    private void SaveRoots(WebUser u)
+    {
+        var roots = _rootsText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(r => Path.GetFullPath(r)).Distinct().ToList();
+        if (roots.Count == 0) { _error = "A user needs at least one workspace root."; return; }
+        Run(() => Store.Update(u.Id, x => x.WorkspaceRoots = roots), done: () => _editRootsId = null);
+    }
+
+    private void Add() => Run(
+        () => Store.Create(_newName, _newPassword, _newAdmin),
+        done: () => { _newName = _newPassword = ""; _newAdmin = false; });
+}

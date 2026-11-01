@@ -1,4 +1,4 @@
-namespace fuseraft.Server.Services;
+namespace fuseraft.Web.Services;
 
 public enum DiffKind { Same, Added, Removed, Skipped }
 

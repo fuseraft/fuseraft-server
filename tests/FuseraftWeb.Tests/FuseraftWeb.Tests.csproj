@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../FuseraftServer.csproj" />
+    <ProjectReference Include="../../FuseraftWeb.csproj" />
   </ItemGroup>
 
   <ItemGroup>

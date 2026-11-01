@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace fuseraft.Server.Models;
+namespace fuseraft.Web.Models;
 
 public enum ApprovalSource { Session, Repl, Daemon }
 
@@ -10,6 +10,8 @@ public sealed class PendingApproval
     public Guid            Id        { get; init; } = Guid.NewGuid();
     public required string SessionId { get; init; }
     public ApprovalSource  Source    { get; init; }
+    /// <summary>The account whose process is asking; null means only admins may answer.</summary>
+    public string?         OwnerId   { get; init; }
     /// <summary>For <see cref="ApprovalSource.Daemon"/>: which daemon is asking.</summary>
     public string?         Origin    { get; init; }
     /// <summary>The request's <c>kind</c>; one this server doesn't know is shown raw.</summary>
@@ -30,9 +32,11 @@ public sealed class PendingApproval
 
     public TaskCompletionSource<bool> Tcs { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public static PendingApproval FromEvent(string sessionId, ApprovalSource source, JsonElement e, string? origin = null) => new()
+    public static PendingApproval FromEvent(string sessionId, ApprovalSource source, JsonElement e,
+        string? origin = null, string? ownerId = null) => new()
     {
         SessionId   = sessionId,
+        OwnerId     = ownerId,
         Source      = source,
         Origin      = origin,
         Kind        = Str(e, "kind") ?? "unknown",

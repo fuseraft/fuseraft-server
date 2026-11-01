@@ -1,7 +1,7 @@
-using fuseraft.Server.Models;
-using fuseraft.Server.Services.Cli;
+using fuseraft.Web.Models;
+using fuseraft.Web.Services.Cli;
 
-namespace fuseraft.Server.Services;
+namespace fuseraft.Web.Services;
 
 public sealed record PluginFunctionEntry(string Name, string Description);
 

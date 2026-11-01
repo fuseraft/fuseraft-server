@@ -1,9 +1,10 @@
 using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.Extensions.Options;
-using fuseraft.Server.Services.Cli;
+using fuseraft.Web.Services.Cli;
+using fuseraft.Web.Services.Users;
 
-namespace FuseraftServer.Tests;
+namespace FuseraftWeb.Tests;
 
 /// <summary>A <see cref="FuseraftCli"/> that answers queries from canned JSON and hands out scripted bridges.</summary>
 internal sealed class FakeCli() : FuseraftCli(Options.Create(new FuseraftCliOptions()))
@@ -14,6 +15,15 @@ internal sealed class FakeCli() : FuseraftCli(Options.Create(new FuseraftCliOpti
     public List<(string[] Args, string? Cwd)> Started { get; } = [];
 
     public List<(string[] Args, string? Cwd)> Queries { get; } = [];
+    public List<IReadOnlyDictionary<string, string>?> Environments { get; } = [];
+    /// <summary>Every home a caller asked for; the fake answers for all of them.</summary>
+    public List<string> Homes { get; } = [];
+
+    public override FuseraftCli ForHome(string home)
+    {
+        Homes.Add(home);
+        return this;
+    }
 
     protected override Task<JsonDocument> QueryAsync(string[] args, string? workingDirectory = null)
     {
@@ -23,16 +33,33 @@ internal sealed class FakeCli() : FuseraftCli(Options.Create(new FuseraftCliOpti
             : throw new FuseraftCliException($"no canned response for '{string.Join(' ', args)}'");
     }
 
-    public override Task RunAsync(params string[] args)
+    public override Task RunAsync(params string[] args) => RunAsync(null, args);
+
+    public override Task RunAsync(IReadOnlyDictionary<string, string>? environment, params string[] args)
     {
         Runs.Add(args);
         return Task.CompletedTask;
     }
 
+    public List<fuseraft.Web.Services.Relay.BridgeTag?> Tags { get; } = [];
+    /// <summary>What <see cref="ReattachBridgesAsync"/> finds: processes "left running by a previous server".</summary>
+    public List<(fuseraft.Web.Services.Relay.BridgeTag Tag, IBridgeProcess Process)> Running { get; } = [];
+
+    public override Task<IBridgeProcess> StartBridgeAsync(IEnumerable<string> args, string? workingDirectory = null,
+        IReadOnlyDictionary<string, string>? environment = null, fuseraft.Web.Services.Relay.BridgeTag? tag = null)
+    {
+        Tags.Add(tag);
+        return Task.FromResult(StartBridge(args, workingDirectory, environment));
+    }
+
+    public override Task<IReadOnlyList<(fuseraft.Web.Services.Relay.BridgeTag Tag, IBridgeProcess Process)>> ReattachBridgesAsync() =>
+        Task.FromResult<IReadOnlyList<(fuseraft.Web.Services.Relay.BridgeTag, IBridgeProcess)>>([.. Running]);
+
     public override IBridgeProcess StartBridge(IEnumerable<string> args, string? workingDirectory = null,
         IReadOnlyDictionary<string, string>? environment = null)
     {
         Started.Add(([.. args], workingDirectory));
+        Environments.Add(environment);
         return Bridges.Dequeue();
     }
 }
@@ -112,4 +139,36 @@ internal static class Wait
             await Task.Delay(10);
         }
     }
+}
+
+/// <summary>A <see cref="UserStore"/> in a temp directory whose accounts' homes are temp directories too.</summary>
+internal sealed class Accounts : IDisposable
+{
+    private readonly string _dir = Directory.CreateTempSubdirectory("fuseraft-web-tests").FullName;
+
+    public Accounts()
+    {
+        Store = new UserStore(
+            Options.Create(new fuseraft.Web.Services.Users.WebOptions { DataDirectory = _dir }),
+            Options.Create(new fuseraft.Web.Services.Users.AuthOptions()));
+        Alice = Add("alice");
+    }
+
+    public UserStore Store { get; }
+    /// <summary>The first account, so an admin.</summary>
+    public WebUser Alice { get; }
+
+    public WebUser Add(string name, List<string>? roots = null)
+    {
+        var user = Store.Create(name, password: null, isAdmin: false);
+        // The first account would get the real ~/.fuseraft; keep every test away from it.
+        Store.Update(user.Id, u =>
+        {
+            u.Home = Path.Combine(_dir, "homes", name);
+            if (roots is not null) u.WorkspaceRoots = roots;
+        });
+        return user;
+    }
+
+    public void Dispose() => Directory.Delete(_dir, recursive: true);
 }

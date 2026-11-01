@@ -1,0 +1,104 @@
+@page "/account"
+@inject CurrentUser Current
+@inject UserStore Users
+@inject IOptions<AuthOptions> Auth
+@inject NavigationManager Nav
+@using Microsoft.Extensions.Options
+
+<PageTitle>Account — Fuseraft</PageTitle>
+
+<div class="page-header">
+    <h1>Account</h1>
+    <p class="muted">Signed in as <strong>@Current.User.UserName</strong>@(Current.User.IsAdmin ? " (admin)" : "").</p>
+</div>
+
+<div class="card" style="max-width:560px">
+    <div class="card-body">
+        <div class="form-group">
+            <div class="form-label">fuseraft home</div>
+            <code>@Current.User.Home</code>
+            <div class="form-hint">Your sessions, chats, memory, schedule and model profiles live here.</div>
+        </div>
+        <div class="form-group">
+            <div class="form-label">Workspaces</div>
+            @if (Current.User.IsAdmin)
+            {
+                <span class="muted">Admins can work anywhere.</span>
+            }
+            else
+            {
+                @foreach (var root in Current.User.WorkspaceRoots)
+                {
+                    <div><code>@root</code></div>
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@if (Auth.Value.LocalAccounts)
+{
+    <h2 class="section-title">Change password</h2>
+    <div class="card" style="max-width:560px">
+        <div class="card-body">
+            @if (_message is not null) { <div class="form-hint">@_message</div> }
+            @if (_error is not null) { <div class="error-banner">@_error</div> }
+            @if (Current.User.PasswordHash is not null)
+            {
+                <div class="form-group">
+                    <label class="form-label">Current password</label>
+                    <input class="input" type="password" autocomplete="current-password" @bind="_current" />
+                </div>
+            }
+            <div class="form-group">
+                <label class="form-label">New password</label>
+                <input class="input" type="password" autocomplete="new-password" @bind="_new" />
+                <div class="form-hint">At least @PasswordHashing.MinimumLength characters. Changing it signs you out everywhere.</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">New password again</label>
+                <input class="input" type="password" autocomplete="new-password" @bind="_confirm" />
+            </div>
+            <button class="btn btn-primary" @onclick="ChangePassword">Change password</button>
+        </div>
+    </div>
+}
+
+@if (Auth.Value.Oidc.Enabled)
+{
+    <h2 class="section-title">Single sign-on</h2>
+    <div class="card" style="max-width:560px">
+        <div class="card-body">
+            @if (Current.User.Logins.Count == 0)
+            {
+                <p class="muted">No sign-on identity is linked.</p>
+            }
+            @foreach (var login in Current.User.Logins)
+            {
+                <div><code>@(login.Email ?? login.Subject)</code> <span class="muted">from @login.Issuer</span></div>
+            }
+            <a class="btn" style="margin-top:12px" href="account/oidc?link=true&returnUrl=%2Faccount" data-enhance-nav="false">
+                Link @Auth.Value.Oidc.DisplayName
+            </a>
+        </div>
+    </div>
+}
+
+@code {
+    private string _current = "", _new = "", _confirm = "";
+    private string? _error, _message;
+
+    private void ChangePassword()
+    {
+        _error = _message = null;
+        var user = Current.User;
+        if (user.PasswordHash is not null && !PasswordHashing.Verify(_current, user.PasswordHash)) { _error = "Your current password is wrong."; return; }
+        if (_new != _confirm) { _error = "The new passwords don't match."; return; }
+        try
+        {
+            Users.SetPassword(user.Id, _new);
+            Nav.NavigateTo("/login", forceLoad: true);
+        }
+        catch (ArgumentException ex) { _error = ex.Message; }
+    }
+}

@@ -1,7 +1,7 @@
 using System.Net.WebSockets;
 using System.Text;
 
-namespace fuseraft.Server.Services.Daemons;
+namespace fuseraft.Web.Services.Daemons;
 
 /// <summary>A line-oriented connection to a daemon's attach endpoint.</summary>
 public interface IDaemonTransport : IAsyncDisposable

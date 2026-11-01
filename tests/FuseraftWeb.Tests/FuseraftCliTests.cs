@@ -1,8 +1,8 @@
 using System.Text.Json;
-using fuseraft.Server.Models;
-using fuseraft.Server.Services.Cli;
+using fuseraft.Web.Models;
+using fuseraft.Web.Services.Cli;
 
-namespace FuseraftServer.Tests;
+namespace FuseraftWeb.Tests;
 
 public sealed class FuseraftCliTests
 {

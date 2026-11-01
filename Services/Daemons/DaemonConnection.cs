@@ -1,8 +1,8 @@
 using System.Text;
 using System.Text.Json;
-using fuseraft.Server.Models;
+using fuseraft.Web.Models;
 
-namespace fuseraft.Server.Services.Daemons;
+namespace fuseraft.Web.Services.Daemons;
 
 /// <summary>
 /// One attach connection to a <c>fuseraft serve</c> daemon. The daemon broadcasts every task's progress to
@@ -252,11 +252,11 @@ public sealed class DaemonConnection(DaemonEndpoint endpoint, HitlBroker broker,
             _relay          = null;
             _cts?.Dispose();
             _cts  = null;
+            // Nobody can answer the daemon any more, so drop the approval cards, before anyone sees it disconnected.
+            if (lostSession is not null) broker.CancelSession(lostSession);
             State = DaemonState.Disconnected;
             Error = error;
         }
-        // Nobody can answer the daemon any more, so drop the approval cards.
-        if (lostSession is not null) broker.CancelSession(lostSession);
         AddActivity(error is null ? "Disconnected" : $"Disconnected: {error}");
     }
 

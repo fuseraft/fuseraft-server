@@ -1839,3 +1839,44 @@ code, pre, .mono { font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Menlo, 
   background: var(--surface2);
   border-top: 1px solid var(--border2);
 }
+
+/* ── Sign-in ─────────────────────────────────────────────────────────────── */
+.auth-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px;
+}
+.auth-logo { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; }
+.auth-title { font-size: 18px; margin: 0 0 16px; }
+.auth-submit { width: 100%; justify-content: center; margin-top: 4px; display: flex; text-decoration: none; }
+.auth-card form + .auth-submit { margin-top: 12px; }
+.auth-card .muted { font-size: 13px; margin-bottom: 16px; }
+
+/* ── Signed-in user ─────────────────────────────────────────────────────── */
+.nav-user {
+  margin-top: auto;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border2);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.nav-user a { color: var(--text); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-user form { margin: 0; }
+.nav-section { padding: 12px 16px 4px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.owner-pill { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 10px; padding: 0 6px; }
+.section-title { font-size: 14px; margin: 24px 0 8px; }
+.users-table td { vertical-align: top; }
+.users-roots { width: 100%; min-height: 60px; font-family: var(--mono, monospace); font-size: 12px; }

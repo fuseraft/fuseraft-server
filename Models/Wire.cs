@@ -1,4 +1,4 @@
-namespace fuseraft.Server.Models;
+namespace fuseraft.Web.Models;
 
 // The server's side of fuseraft's wire protocol (docs/protocol.md in fuseraft-cli). These mirror the
 // JSON, not fuseraft's internal types, so a fuseraft refactor can't break the server's build.

@@ -1,4 +1,4 @@
-namespace fuseraft.Server.Models;
+namespace fuseraft.Web.Models;
 
 /// <summary>A running <c>fuseraft serve</c> to attach to, from <c>Fuseraft:Daemons</c> or added on the Daemons page.</summary>
 public sealed class DaemonEndpoint
