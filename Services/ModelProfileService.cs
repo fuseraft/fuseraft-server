@@ -2,14 +2,14 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
-using fuseraft.Server.Models;
+using fuseraft.Web.Models;
 
-namespace fuseraft.Server.Services;
+namespace fuseraft.Web.Services;
 
 /// <summary>
-/// Manages stored model profiles (name, model ID, endpoint, provider) with API keys
-/// held in the OS keychain. On startup all API keys are injected as environment variables
-/// so the orchestrator finds them via the profile's <see cref="ModelProfile.ApiKeyEnvVar"/>.
+/// One user's model profiles (name, model ID, endpoint, provider), kept in their fuseraft home, with API keys
+/// held in the OS keychain. Keys are handed only to the processes that user starts, through
+/// <see cref="KeyEnvironmentAsync"/>, never set on the server's own environment.
 /// </summary>
 public sealed class ModelProfileService
 {
@@ -20,15 +20,26 @@ public sealed class ModelProfileService
         PropertyNameCaseInsensitive = true,
     };
 
-    private static string ProfilesFilePath =>
-        Path.Combine(FuseraftHome.Root, "model-profiles.json");
+    private string ProfilesFilePath => Path.Combine(_home, "model-profiles.json");
 
     private readonly List<ModelProfile> _profiles = [];
     private readonly SemaphoreSlim      _lock     = new(1, 1);
+    private readonly string _home;
+    private readonly string _keyNamespace;
+    private readonly bool _useKeychain;
 
     public event Action? ProfilesChanged;
 
-    public ModelProfileService() => _ = LoadAsync();
+    /// <param name="home">The fuseraft home the profiles live in.</param>
+    /// <param name="keyNamespace">Prefixes keychain entries, which the OS user's accounts all share.</param>
+    /// <param name="useKeychain">False keeps keys in the home's plain-text fallback, so tests never touch the real keychain.</param>
+    public ModelProfileService(string home, string keyNamespace, bool useKeychain = true)
+    {
+        _home         = home;
+        _keyNamespace = keyNamespace;
+        _useKeychain  = useKeychain;
+        _ = LoadAsync();
+    }
 
     private async Task LoadAsync()
     {
@@ -40,12 +51,6 @@ public sealed class ModelProfileService
             var loaded = JsonSerializer.Deserialize<List<ModelProfile>>(json, JsonOpts) ?? [];
             _profiles.Clear();
             _profiles.AddRange(loaded);
-            foreach (var p in _profiles)
-            {
-                var key = await RetrieveKeyAsync(p.Id);
-                if (!string.IsNullOrEmpty(key))
-                    Environment.SetEnvironmentVariable(p.ApiKeyEnvVar, key);
-            }
         }
         catch { /* load is best-effort; corrupt file is silently skipped */ }
         finally { _lock.Release(); }
@@ -69,34 +74,41 @@ public sealed class ModelProfileService
             await PersistAsync();
 
             if (!string.IsNullOrEmpty(apiKey))
-            {
                 await StoreKeyAsync(profile.Id, apiKey);
-                Environment.SetEnvironmentVariable(profile.ApiKeyEnvVar, apiKey);
-            }
         }
         finally { _lock.Release(); ProfilesChanged?.Invoke(); }
     }
 
     public async Task DeleteAsync(string id)
     {
-        ModelProfile? found = null;
         await _lock.WaitAsync();
         try
         {
-            found = _profiles.FirstOrDefault(p => p.Id == id);
             _profiles.RemoveAll(p => p.Id == id);
             await PersistAsync();
             await DeleteKeyAsync(id);
         }
         finally { _lock.Release(); }
-
-        if (found is not null)
-            Environment.SetEnvironmentVariable(found.ApiKeyEnvVar, null);
         ProfilesChanged?.Invoke();
     }
 
     public async Task<bool> HasKeyAsync(string id) =>
         !string.IsNullOrEmpty(await RetrieveKeyAsync(id));
+
+    public Task<string?> GetKeyAsync(string id) => RetrieveKeyAsync(id);
+
+    /// <summary>
+    /// Every profile's key as <see cref="ModelProfile.ApiKeyEnvVar"/>, for the environment of a process this user
+    /// starts, so a config's <c>apiKeyEnvVar: FUSERAFT_PROFILE_{id}_KEY</c> resolves.
+    /// </summary>
+    public async Task<Dictionary<string, string>> KeyEnvironmentAsync()
+    {
+        var env = new Dictionary<string, string>();
+        foreach (var p in await ListAsync())
+            if (await RetrieveKeyAsync(p.Id) is { Length: > 0 } key)
+                env[p.ApiKeyEnvVar] = key;
+        return env;
+    }
 
     // ── Persistence ─────────────────────────────────────────────────────────────
 
@@ -109,48 +121,79 @@ public sealed class ModelProfileService
 
     // ── Platform-specific keychain storage ──────────────────────────────────────
 
-    private const string KeyService = "fuseraft-server";
-    private static string AccountName(string profileId) => $"profile-{profileId}";
+    private const string KeyService = "fuseraft-web";
+    // Where keys lived before accounts existed; read once, then moved under KeyService.
+    private const string LegacyKeyService = "fuseraft-server";
+    private string AccountName(string profileId) => $"{_keyNamespace}profile-{profileId}";
+    private static string LegacyAccountName(string profileId) => $"profile-{profileId}";
 
-    private static async Task StoreKeyAsync(string profileId, string apiKey)
+    private async Task StoreKeyAsync(string profileId, string apiKey)
     {
-        try
+        if (_useKeychain)
         {
-            if (OperatingSystem.IsWindows())  { WindowsStoreKey(profileId, apiKey); return; }
-            if (OperatingSystem.IsMacOS())    { await MacStoreKeyAsync(profileId, apiKey); return; }
-            if (OperatingSystem.IsLinux() && await SecretToolAvailableAsync())
+            try
             {
-                await LinuxStoreKeyAsync(profileId, apiKey);
-                return;
+                var account = AccountName(profileId);
+                if (OperatingSystem.IsWindows()) { WindowsStoreKey(KeyService, account, apiKey); return; }
+                if (OperatingSystem.IsMacOS())   { await MacStoreKeyAsync(KeyService, account, apiKey); return; }
+                if (OperatingSystem.IsLinux() && await SecretToolAvailableAsync())
+                {
+                    await LinuxStoreKeyAsync(KeyService, account, apiKey);
+                    return;
+                }
             }
+            catch { /* fall through to plain-text */ }
         }
-        catch { /* fall through to plain-text */ }
         await PlainTextStoreAsync(profileId, apiKey);
     }
 
-    private static async Task<string?> RetrieveKeyAsync(string profileId)
+    private async Task<string?> RetrieveKeyAsync(string profileId)
     {
-        try
+        if (!_useKeychain) return await PlainTextRetrieveAsync(profileId);
+        if (await KeychainRetrieveAsync(KeyService, AccountName(profileId)) is { Length: > 0 } key)
+            return key;
+        if (_home == FuseraftHome.Root &&
+            await KeychainRetrieveAsync(LegacyKeyService, LegacyAccountName(profileId)) is { Length: > 0 } legacy)
         {
-            if (OperatingSystem.IsWindows())  return WindowsRetrieveKey(profileId);
-            if (OperatingSystem.IsMacOS())    return await MacRetrieveKeyAsync(profileId);
-            if (OperatingSystem.IsLinux() && await SecretToolAvailableAsync())
-                return await LinuxRetrieveKeyAsync(profileId);
+            await StoreKeyAsync(profileId, legacy);
+            await KeychainDeleteAsync(LegacyKeyService, LegacyAccountName(profileId));
+            return legacy;
         }
-        catch { }
         return await PlainTextRetrieveAsync(profileId);
     }
 
-    private static async Task DeleteKeyAsync(string profileId)
+    private static async Task<string?> KeychainRetrieveAsync(string service, string account)
     {
         try
         {
-            if (OperatingSystem.IsWindows())  { WindowsDeleteKey(profileId); }
-            else if (OperatingSystem.IsMacOS()) { await MacDeleteKeyAsync(profileId); }
-            else if (OperatingSystem.IsLinux() && await SecretToolAvailableAsync())
-                { await LinuxDeleteKeyAsync(profileId); }
+            if (OperatingSystem.IsWindows())  return WindowsRetrieveKey(service, account);
+            if (OperatingSystem.IsMacOS())    return await MacRetrieveKeyAsync(service, account);
+            if (OperatingSystem.IsLinux() && await SecretToolAvailableAsync())
+                return await LinuxRetrieveKeyAsync(service, account);
         }
         catch { }
+        return null;
+    }
+
+    private static async Task KeychainDeleteAsync(string service, string account)
+    {
+        try
+        {
+            if (OperatingSystem.IsWindows())  WindowsDeleteKey(service, account);
+            else if (OperatingSystem.IsMacOS()) await MacDeleteKeyAsync(service, account);
+            else if (OperatingSystem.IsLinux() && await SecretToolAvailableAsync())
+                await LinuxDeleteKeyAsync(service, account);
+        }
+        catch { }
+    }
+
+    private async Task DeleteKeyAsync(string profileId)
+    {
+        if (_useKeychain)
+        {
+            await KeychainDeleteAsync(KeyService, AccountName(profileId));
+            await KeychainDeleteAsync(LegacyKeyService, LegacyAccountName(profileId));
+        }
         PlainTextDelete(profileId);
     }
 
@@ -175,11 +218,10 @@ public sealed class ModelProfileService
         return _secretToolAvailable!.Value;
     }
 
-    private static async Task LinuxStoreKeyAsync(string profileId, string apiKey)
+    private static async Task LinuxStoreKeyAsync(string service, string account, string apiKey)
     {
-        var account = AccountName(profileId);
         var psi = new ProcessStartInfo("secret-tool",
-            $"store --label \"fuseraft model profile\" service {KeyService} account {account}")
+            $"store --label \"fuseraft model profile\" service {service} account {account}")
         {
             RedirectStandardInput  = true,
             RedirectStandardOutput = true,
@@ -196,55 +238,50 @@ public sealed class ModelProfileService
             throw new InvalidOperationException($"secret-tool store failed: {(await stderrTask).Trim()}");
     }
 
-    private static async Task<string?> LinuxRetrieveKeyAsync(string profileId)
+    private static async Task<string?> LinuxRetrieveKeyAsync(string service, string account)
     {
-        var account = AccountName(profileId);
         var (exit, stdout, _) = await RunAsync("secret-tool",
-            $"lookup service {KeyService} account {account}");
+            $"lookup service {service} account {account}");
         return exit == 0 && !string.IsNullOrEmpty(stdout) ? stdout.Trim() : null;
     }
 
-    private static async Task LinuxDeleteKeyAsync(string profileId)
+    private static async Task LinuxDeleteKeyAsync(string service, string account)
     {
-        var account = AccountName(profileId);
-        await RunAsync("secret-tool", $"clear service {KeyService} account {account}");
+        await RunAsync("secret-tool", $"clear service {service} account {account}");
     }
 
     // ── macOS (security CLI) ─────────────────────────────────────────────────────
 
-    private static async Task MacStoreKeyAsync(string profileId, string apiKey)
+    private static async Task MacStoreKeyAsync(string service, string account, string apiKey)
     {
-        var account = AccountName(profileId);
         var (exit, _, stderr) = await RunAsync("security",
-            $"add-generic-password -s \"{KeyService}\" -a \"{account}\" -w \"{apiKey}\" -U");
+            $"add-generic-password -s \"{service}\" -a \"{account}\" -w \"{apiKey}\" -U");
         if (exit != 0)
             throw new InvalidOperationException($"security add-generic-password failed: {stderr.Trim()}");
     }
 
-    private static async Task<string?> MacRetrieveKeyAsync(string profileId)
+    private static async Task<string?> MacRetrieveKeyAsync(string service, string account)
     {
-        var account = AccountName(profileId);
         var (exit, stdout, _) = await RunAsync("security",
-            $"find-generic-password -s \"{KeyService}\" -a \"{account}\" -w");
+            $"find-generic-password -s \"{service}\" -a \"{account}\" -w");
         return exit == 0 && !string.IsNullOrEmpty(stdout) ? stdout.Trim() : null;
     }
 
-    private static async Task MacDeleteKeyAsync(string profileId)
+    private static async Task MacDeleteKeyAsync(string service, string account)
     {
-        var account = AccountName(profileId);
         await RunAsync("security",
-            $"delete-generic-password -s \"{KeyService}\" -a \"{account}\"");
+            $"delete-generic-password -s \"{service}\" -a \"{account}\"");
     }
 
     // ── Windows (Credential Manager) ─────────────────────────────────────────────
 
-    private static string WinTarget(string profileId) => $"{KeyService}/profile-{profileId}";
+    private static string WinTarget(string service, string account) => $"{service}/{account}";
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private static void WindowsStoreKey(string profileId, string apiKey)
+    private static void WindowsStoreKey(string service, string account, string apiKey)
     {
         var blob      = Encoding.Unicode.GetBytes(apiKey);
-        var target    = WinTarget(profileId);
+        var target    = WinTarget(service, account);
         var blobPtr   = Marshal.AllocHGlobal(blob.Length);
         var targetPtr = Marshal.StringToHGlobalUni(target);
         var userPtr   = Marshal.StringToHGlobalUni("fuseraft");
@@ -273,9 +310,9 @@ public sealed class ModelProfileService
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private static string? WindowsRetrieveKey(string profileId)
+    private static string? WindowsRetrieveKey(string service, string account)
     {
-        var target = WinTarget(profileId);
+        var target = WinTarget(service, account);
         if (!CredRead(target, 1, 0, out var ptr)) return null;
         try
         {
@@ -289,18 +326,16 @@ public sealed class ModelProfileService
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private static void WindowsDeleteKey(string profileId)
-        => CredDelete(WinTarget(profileId), 1, 0);
+    private static void WindowsDeleteKey(string service, string account)
+        => CredDelete(WinTarget(service, account), 1, 0);
 
-    // ── Plain-text fallback (~/.fuseraft/profile-keys/{id}, mode 600) ────────────
+    // ── Plain-text fallback ({home}/profile-keys/{id}, mode 600) ──────────────────
 
-    private static string PlainTextDir =>
-        Path.Combine(FuseraftHome.Root, "profile-keys");
+    private string PlainTextDir => Path.Combine(_home, "profile-keys");
 
-    private static string PlainTextPath(string profileId) =>
-        Path.Combine(PlainTextDir, profileId);
+    private string PlainTextPath(string profileId) => Path.Combine(PlainTextDir, profileId);
 
-    private static async Task PlainTextStoreAsync(string profileId, string apiKey)
+    private async Task PlainTextStoreAsync(string profileId, string apiKey)
     {
         Directory.CreateDirectory(PlainTextDir);
         var path = PlainTextPath(profileId);
@@ -309,7 +344,7 @@ public sealed class ModelProfileService
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
     }
 
-    private static async Task<string?> PlainTextRetrieveAsync(string profileId)
+    private async Task<string?> PlainTextRetrieveAsync(string profileId)
     {
         var path = PlainTextPath(profileId);
         if (!File.Exists(path)) return null;
@@ -317,7 +352,7 @@ public sealed class ModelProfileService
         catch { return null; }
     }
 
-    private static void PlainTextDelete(string profileId)
+    private void PlainTextDelete(string profileId)
     {
         var path = PlainTextPath(profileId);
         if (File.Exists(path)) File.Delete(path);
@@ -373,4 +408,15 @@ public sealed class ModelProfileService
 
     [DllImport("advapi32.dll", SetLastError = true)]
     private static extern bool CredFree(IntPtr credential);
+}
+
+/// <summary>Each account's <see cref="ModelProfileService"/>, kept for the server's lifetime so their change events reach every tab.</summary>
+public sealed class ModelProfileRegistry
+{
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, ModelProfileService> _byUser = new();
+
+    internal bool UseKeychain { get; init; } = true;
+
+    public ModelProfileService For(fuseraft.Web.Services.Users.WebUser user) =>
+        _byUser.GetOrAdd(user.Id, _ => new ModelProfileService(user.Home, $"{user.Id}/", UseKeychain));
 }

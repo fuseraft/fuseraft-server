@@ -1,11 +1,13 @@
 using System.Collections.Concurrent;
-using fuseraft.Server.Models;
+using fuseraft.Web.Models;
+using fuseraft.Web.Services.Users;
 
-namespace fuseraft.Server.Services;
+namespace fuseraft.Web.Services;
 
 /// <summary>
 /// Holds every approval a fuseraft process is waiting on, for the HITL page (and the REPL page) to
-/// answer. Each request parks its process's <see cref="ApprovalRelay"/> until someone responds.
+/// answer. Each request parks its process's <see cref="ApprovalRelay"/> until someone responds. Pages see and
+/// answer only what their user may (<see cref="WebUser.CanAccess"/>); the unfiltered members are for the services.
 /// </summary>
 public sealed class HitlBroker
 {
@@ -18,6 +20,19 @@ public sealed class HitlBroker
 
     public IReadOnlyCollection<PendingApproval> GetPending(string sessionId) =>
         _pending.Values.Where(p => p.SessionId == sessionId).OrderBy(p => p.Created).ToList();
+
+    public IReadOnlyCollection<PendingApproval> GetPending(WebUser user) =>
+        _pending.Values.Where(p => user.CanAccess(p.OwnerId)).OrderBy(p => p.Created).ToList();
+
+    public IReadOnlyCollection<PendingApproval> GetPending(WebUser user, string sessionId) =>
+        GetPending(sessionId).Where(p => user.CanAccess(p.OwnerId)).ToList();
+
+    /// <summary>Answers a request for <paramref name="user"/>; one they may not answer is left waiting.</summary>
+    public void Respond(WebUser user, Guid id, bool approved)
+    {
+        if (_pending.TryGetValue(id, out var req) && user.CanAccess(req.OwnerId))
+            Respond(id, approved);
+    }
 
     public PendingApproval Enqueue(PendingApproval request)
     {

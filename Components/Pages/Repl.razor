@@ -104,7 +104,7 @@
 }
 else
 {
-    var session = ReplService.GetSession(_activeSessionId!);
+    var session = ReplService.GetSession(Current.User, _activeSessionId!);
     if (session is null)
     {
         <p class="muted">Session not found.</p>
@@ -167,7 +167,7 @@ else
                 </div>
             }
 
-            @foreach (var req in Broker.GetPending(session.SessionId).Where(r => r.Source == ApprovalSource.Repl))
+            @foreach (var req in Broker.GetPending(Current.User, session.SessionId).Where(r => r.Source == ApprovalSource.Repl))
             {
                 <ApprovalCard @key="req.Id" Request="req" ShowSource="false" />
             }
@@ -238,7 +238,7 @@ else
             _selectedProfileId = _profiles[0].Id;
 
         // Re-attach to any session left open from a previous page visit.
-        _activeSessionId = ReplService.GetSessions().FirstOrDefault()?.Key;
+        _activeSessionId = ReplService.GetSessions(Current.User).FirstOrDefault()?.Key;
 
         ReplService.SessionChanged += OnSessionChanged;
         Broker.PendingChanged      += OnPendingChanged;
@@ -248,7 +248,7 @@ else
     {
         try
         {
-            _snapshots = await ReplService.ListSnapshotsAsync();
+            _snapshots = await ReplService.ListSnapshotsAsync(Current.User);
         }
         catch (FuseraftCliException ex)
         {
@@ -265,7 +265,7 @@ else
         InvokeAsync(async () =>
         {
             // Session was removed (process exited or /exit sent) — go back to new-session view.
-            if (ReplService.GetSession(sessionId) is null)
+            if (ReplService.GetSession(Current.User, sessionId) is null)
             {
                 _activeSessionId = null;
                 await RefreshSnapshotsAsync();
@@ -285,7 +285,7 @@ else
             if (!string.IsNullOrWhiteSpace(_workspace) && !Directory.Exists(_workspace.Trim()))
                 throw new DirectoryNotFoundException($"Workspace not found: {_workspace.Trim()}");
             WorkspaceService.Set(_workspace);
-            _activeSessionId = await ReplService.CreateSessionAsync(_selectedProfileId, _systemPrompt, _workspace);
+            _activeSessionId = await ReplService.CreateSessionAsync(Current.User, _selectedProfileId, _systemPrompt, _workspace);
         }
         catch (Exception ex)
         {
@@ -303,7 +303,7 @@ else
         _pageError = null;
         try
         {
-            _activeSessionId = await ReplService.ResumeSnapshotAsync(snapshotId);
+            _activeSessionId = await ReplService.ResumeSnapshotAsync(Current.User, snapshotId);
             await RefreshSnapshotsAsync();
         }
         catch (Exception ex)
@@ -317,19 +317,19 @@ else
         var text = _input.Trim();
         if (string.IsNullOrEmpty(text) || _activeSessionId is null) return;
         _input = "";
-        ReplService.SendMessage(_activeSessionId, text);
+        ReplService.SendMessage(Current.User, _activeSessionId, text);
     }
 
-    private void Cancel() => ReplService.CancelSession(_activeSessionId!);
+    private void Cancel() => ReplService.CancelSession(Current.User, _activeSessionId!);
 
-    private void Clear() => ReplService.ClearSession(_activeSessionId!);
+    private void Clear() => ReplService.ClearSession(Current.User, _activeSessionId!);
 
     private void CloseSession()
     {
         var id = _activeSessionId;
         _activeSessionId = null;
         if (id is not null)
-            ReplService.CloseSession(id);
+            ReplService.CloseSession(Current.User, id);
     }
 
     private void OnKeyDown(KeyboardEventArgs e)

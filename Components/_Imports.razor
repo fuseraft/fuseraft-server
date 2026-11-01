@@ -6,10 +6,14 @@
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.AspNetCore.Components.Web.Virtualization
 @using Microsoft.JSInterop
-@using fuseraft.Server.Components
-@using fuseraft.Server.Components.Layout
-@using fuseraft.Server.Components.Shared
-@using fuseraft.Server.Models
-@using fuseraft.Server.Services
-@using fuseraft.Server.Services.Cli
-@using fuseraft.Server.Services.Daemons
+@using fuseraft.Web.Components
+@using fuseraft.Web.Components.Layout
+@using fuseraft.Web.Components.Shared
+@using fuseraft.Web.Models
+@using fuseraft.Web.Services
+@using fuseraft.Web.Services.Cli
+@using fuseraft.Web.Services.Daemons
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using fuseraft.Web.Services.Users
+@inject CurrentUser Current

@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
-using fuseraft.Server.Models;
-using fuseraft.Server.Services.Cli;
+using fuseraft.Web.Models;
+using fuseraft.Web.Services.Cli;
+using fuseraft.Web.Services.Relay;
+using fuseraft.Web.Services.Users;
 
-namespace fuseraft.Server.Services;
+namespace fuseraft.Web.Services;
 
 public enum ReplStatus { Idle, Thinking, Error }
 
@@ -15,6 +17,7 @@ public sealed class ActiveReplSession : IDisposable
     public string        Key       { get; init; } = "";
     /// <summary>Real session ID from the CLI's 'ready' event; starts equal to Key.</summary>
     public string        SessionId { get; set; }  = "";
+    public string        OwnerId   { get; init; } = "";
     public string        ProfileId { get; init; } = "";
     public string        ModelId   { get; set; }  = "";
     /// <summary>The directory the chat runs in; its tools are sandboxed to it.</summary>
@@ -31,10 +34,16 @@ public sealed class ActiveReplSession : IDisposable
     internal IBridgeProcess? Bridge { get; set; }
     internal ApprovalRelay?  Relay  { get; set; }
 
+    /// <summary>Ends the chat's process; once it has exited, its relay's files go too.</summary>
     public void Dispose()
     {
-        Bridge?.Kill();
-        Bridge?.Dispose();
+        if (Bridge is not { } bridge) return;
+        bridge.Kill();
+        _ = Task.Run(async () =>
+        {
+            try { await bridge.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30)); } catch { }
+            bridge.Dispose();
+        });
     }
 }
 
@@ -42,13 +51,19 @@ public sealed class ActiveReplSession : IDisposable
 /// Manages fuseraft REPL sessions by spawning <c>fuseraft repl --vscode</c> as a child
 /// process and speaking the same JSON-line protocol used by the VS Code extension. The REPL
 /// asks before writing files or running commands; those requests go to the <see cref="HitlBroker"/>.
+/// Each chat belongs to the account that opened it and runs against that account's fuseraft home. Chats run in
+/// relays, so stopping the server leaves them open and the next server adopts them.
 /// </summary>
 public sealed class ReplService : IDisposable
 {
     private readonly ConcurrentDictionary<string, ActiveReplSession> _sessions = new();
-    private readonly ModelProfileService _profiles;
+    private readonly ModelProfileRegistry _profiles;
     private readonly FuseraftCli _cli;
     private readonly HitlBroker  _hitl;
+    private volatile bool _stopping;
+
+    /// <summary>The <see cref="BridgeTag.Kind"/> of a chat's relay.</summary>
+    public const string Kind = "repl";
 
     private static readonly JsonSerializerOptions _jsonOpts = new()
     {
@@ -57,7 +72,7 @@ public sealed class ReplService : IDisposable
 
     public event Action<string>? SessionChanged;
 
-    public ReplService(ModelProfileService profiles, FuseraftCli cli, HitlBroker hitl)
+    public ReplService(ModelProfileRegistry profiles, FuseraftCli cli, HitlBroker hitl)
     {
         _profiles = profiles;
         _cli      = cli;
@@ -66,34 +81,43 @@ public sealed class ReplService : IDisposable
 
     // ── Session creation ─────────────────────────────────────────────────────
 
-    public async Task<string> CreateSessionAsync(string profileId, string systemPrompt, string? workspaceDir = null)
+    public async Task<string> CreateSessionAsync(WebUser user, string profileId, string systemPrompt, string? workspaceDir = null)
     {
-        var profile = await GetProfileAsync(profileId);
+        var access  = WorkspaceAccess.For(user);
+        var cwd     = string.IsNullOrWhiteSpace(workspaceDir) ? null : access.Check(workspaceDir);
+        if (cwd is null && access.Roots.Count > 0)
+            throw new ArgumentException("Pick a workspace for the chat.");
+        var profile = await GetProfileAsync(user, profileId);
         var key     = NewKey();
         var session = new ActiveReplSession
         {
             Key       = key,
             SessionId = key,
+            OwnerId   = user.Id,
             ProfileId = profile.Id,
             ModelId   = profile.ModelId,
-            Cwd       = string.IsNullOrWhiteSpace(workspaceDir) ? null : workspaceDir.Trim(),
+            Cwd       = cwd,
         };
         _sessions[key] = session;
 
         var args = new List<string> { "repl", "--vscode", "--no-banner", "--model", profile.ModelId };
+        args.AddRange(ConnectionArgs(profile));
         if (!string.IsNullOrWhiteSpace(systemPrompt))
             args.AddRange(["--system", systemPrompt]);
 
-        Spawn(key, session, profile, args);
+        await SpawnAsync(user, key, session, profile, args);
         return key;
     }
 
-    public async Task<string> ResumeSnapshotAsync(string snapshotSessionId)
+    public async Task<string> ResumeSnapshotAsync(WebUser user, string snapshotSessionId)
     {
-        var snapshot = (await ListSnapshotsAsync()).FirstOrDefault(s => s.SessionId == snapshotSessionId)
+        var snapshot = (await ListSnapshotsAsync(user)).FirstOrDefault(s => s.SessionId == snapshotSessionId)
             ?? throw new InvalidOperationException($"Snapshot '{snapshotSessionId}' not found.");
+        var cwd = Directory.Exists(snapshot.Cwd) ? snapshot.Cwd : null;
+        if (cwd is not null && !WorkspaceAccess.For(user).Allows(cwd))
+            throw new UnauthorizedAccessException($"That chat ran in '{cwd}', which is outside your workspaces.");
 
-        var profiles = await _profiles.ListAsync();
+        var profiles = await _profiles.For(user).ListAsync();
         var profile  = profiles.FirstOrDefault(p => p.ModelId == snapshot.ModelId)
                     ?? profiles.FirstOrDefault()
                     ?? throw new InvalidOperationException("No model profiles configured.");
@@ -103,10 +127,11 @@ public sealed class ReplService : IDisposable
         {
             Key       = key,
             SessionId = snapshotSessionId,
+            OwnerId   = user.Id,
             ProfileId = profile.Id,
             ModelId   = snapshot.ModelId,
             // A chat resumes in the directory it ran in, so its sandbox and paths still line up.
-            Cwd       = Directory.Exists(snapshot.Cwd) ? snapshot.Cwd : null,
+            Cwd       = cwd,
         };
         _sessions[key] = session;
 
@@ -116,25 +141,30 @@ public sealed class ReplService : IDisposable
             "--model", snapshot.ModelId,
             "--resume", snapshotSessionId,
         };
-        Spawn(key, session, profile, args);
+        args.AddRange(ConnectionArgs(profile));
+        await SpawnAsync(user, key, session, profile, args);
         return key;
     }
 
-    private void Spawn(string key, ActiveReplSession session, ModelProfile profile, List<string> args)
+    private async Task SpawnAsync(WebUser user, string key, ActiveReplSession session, ModelProfile profile, List<string> args)
     {
         // Inject the profile's API key as FUSERAFT_API_KEY — same channel the VS Code
         // extension uses so the CLI picks it up in --vscode mode.
-        var env    = new Dictionary<string, string>();
-        var apiKey = Environment.GetEnvironmentVariable(profile.ApiKeyEnvVar) ?? "";
-        if (!string.IsNullOrEmpty(apiKey))
+        var env = new Dictionary<string, string>();
+        if (await _profiles.For(user).GetKeyAsync(profile.Id) is { Length: > 0 } apiKey)
             env["FUSERAFT_API_KEY"] = apiKey;
+
+        var tag = new BridgeTag
+        {
+            Kind = Kind, OwnerId = user.Id, StartedAt = session.StartedAt,
+            Extra = { ["key"] = key, ["profileId"] = profile.Id, ["modelId"] = session.ModelId, ["sessionId"] = session.SessionId },
+        };
+        if (session.Cwd is not null) tag.Extra["cwd"] = session.Cwd;
 
         try
         {
-            var bridge = _cli.StartBridge(args, session.Cwd, env);
-            session.Bridge = bridge;
-            session.Relay  = new ApprovalRelay(_hitl, bridge.Input, ApprovalSource.Repl);
-            _ = Task.Run(() => ReadLoopAsync(key, bridge));
+            var bridge = await _cli.ForHome(user.Home).StartBridgeAsync(args, session.Cwd, env, tag);
+            Attach(key, session, bridge);
         }
         catch (Exception ex)
         {
@@ -142,6 +172,40 @@ public sealed class ReplService : IDisposable
             session.Error  = $"Could not start fuseraft: {ex.Message}";
             SessionChanged?.Invoke(key);
         }
+    }
+
+    private void Attach(string key, ActiveReplSession session, IBridgeProcess bridge)
+    {
+        session.Bridge = bridge;
+        session.Relay  = new ApprovalRelay(_hitl, bridge.Input, ApprovalSource.Repl, ownerId: session.OwnerId);
+        _ = Task.Run(() => ReadLoopAsync(key, bridge));
+    }
+
+    /// <summary>
+    /// Takes over a chat a previous server left open. Its relay replays the conversation, including what was typed,
+    /// so the chat reappears as it was, and approvals still waiting are asked again.
+    /// </summary>
+    public void AdoptRunning(BridgeTag tag, IBridgeProcess bridge, WebUser? owner)
+    {
+        if (owner is null || tag.Extra.GetValueOrDefault("key") is not { Length: > 0 } key)
+        {
+            bridge.Kill();
+            bridge.Dispose();
+            return;
+        }
+        var session = new ActiveReplSession
+        {
+            Key       = key,
+            SessionId = tag.Extra.GetValueOrDefault("sessionId") ?? key,
+            OwnerId   = owner.Id,
+            ProfileId = tag.Extra.GetValueOrDefault("profileId") ?? "",
+            ModelId   = tag.Extra.GetValueOrDefault("modelId") ?? "",
+            Cwd       = tag.Extra.GetValueOrDefault("cwd"),
+            StartedAt = tag.StartedAt,
+        };
+        _sessions[key] = session;
+        Attach(key, session, bridge);
+        SessionChanged?.Invoke(key);
     }
 
     // ── Stdout reader ────────────────────────────────────────────────────────
@@ -167,7 +231,17 @@ public sealed class ReplService : IDisposable
         catch { /* pipe closed */ }
         finally
         {
-            if (_sessions.TryGetValue(key, out var s))
+            if (_stopping)
+            {
+                // The server let go; the chat stays open in its relay.
+            }
+            else if (!_sessions.TryGetValue(key, out var s))
+            {
+                // Ended normally (session_end); once the process is gone its relay's files can go.
+                await bridge.WaitForExitAsync();
+                bridge.Dispose();
+            }
+            else
             {
                 // Still listed means no session_end arrived: the process died. Keep the chat on
                 // screen with the reason instead of silently dropping back to the start form.
@@ -209,6 +283,20 @@ public sealed class ReplService : IDisposable
 
             case "approval_request":
                 s.Relay?.Handle(s.SessionId, root);
+                break;
+
+            case RelayBridge.ReplayedInput:
+                // Something typed before this server took over, replayed so the chat reads as it did.
+                var typed = Str(root, "text") ?? "";
+                var raw   = root.TryGetProperty("raw", out var r) && r.ValueKind == JsonValueKind.True;
+                if (raw && typed == "/clear")
+                    s.Messages.Clear();
+                else if (!raw)
+                {
+                    s.Messages.Add(new ReplMessage("user", typed, [], DateTimeOffset.UtcNow));
+                    s.Status        = ReplStatus.Thinking;
+                    s.StreamingText = "";
+                }
                 break;
 
             case "text":
@@ -310,9 +398,9 @@ public sealed class ReplService : IDisposable
 
     // ── User actions ─────────────────────────────────────────────────────────
 
-    public void SendMessage(string key, string text)
+    public void SendMessage(WebUser user, string key, string text)
     {
-        if (!_sessions.TryGetValue(key, out var s)) return;
+        if (GetSession(user, key) is not { } s) return;
         if (s.Status == ReplStatus.Thinking) return;
 
         var trimmed = text.Trim();
@@ -328,9 +416,9 @@ public sealed class ReplService : IDisposable
         WriteStdin(s, trimmed);
     }
 
-    public void ClearSession(string key)
+    public void ClearSession(WebUser user, string key)
     {
-        if (!_sessions.TryGetValue(key, out var s)) return;
+        if (GetSession(user, key) is not { } s) return;
         s.Messages.Clear();
         SessionChanged?.Invoke(key);
         // Also clear CLI history
@@ -338,16 +426,16 @@ public sealed class ReplService : IDisposable
     }
 
     /// <summary>Stops the reply in progress; the chat stays open.</summary>
-    public void CancelSession(string key)
+    public void CancelSession(WebUser user, string key)
     {
-        if (!_sessions.TryGetValue(key, out var s) || s.Relay is not { } relay) return;
+        if (GetSession(user, key) is not { Relay: { } relay } s) return;
         _hitl.CancelSession(s.SessionId);
         _ = relay.InterruptAsync();
     }
 
-    public void CloseSession(string key)
+    public void CloseSession(WebUser user, string key)
     {
-        if (_sessions.TryRemove(key, out var s))
+        if (GetSession(user, key) is not null && _sessions.TryRemove(key, out var s))
         {
             s.Dispose();
             SessionChanged?.Invoke(key);
@@ -356,13 +444,15 @@ public sealed class ReplService : IDisposable
 
     // ── Queries ──────────────────────────────────────────────────────────────
 
-    public ActiveReplSession? GetSession(string key) => _sessions.GetValueOrDefault(key);
+    /// <summary>A chat <paramref name="user"/> may see and type into: only their own, admins included.</summary>
+    public ActiveReplSession? GetSession(WebUser user, string key) =>
+        _sessions.GetValueOrDefault(key) is { } s && s.OwnerId == user.Id ? s : null;
 
-    public IEnumerable<ActiveReplSession> GetSessions() =>
-        _sessions.Values.OrderByDescending(s => s.StartedAt);
+    public IEnumerable<ActiveReplSession> GetSessions(WebUser user) =>
+        _sessions.Values.Where(s => s.OwnerId == user.Id).OrderByDescending(s => s.StartedAt);
 
-    public Task<List<WireReplSession>> ListSnapshotsAsync() =>
-        _cli.ListAsync<WireReplSession>("sessions", "--repl", "--json");
+    public Task<List<WireReplSession>> ListSnapshotsAsync(WebUser user) =>
+        _cli.ForHome(user.Home).ListAsync<WireReplSession>("sessions", "--repl", "--json");
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -379,11 +469,30 @@ public sealed class ReplService : IDisposable
         try { s.Bridge?.Input.WriteLine(text); } catch { }
     }
 
-    private async Task<ModelProfile> GetProfileAsync(string profileId)
+    private async Task<ModelProfile> GetProfileAsync(WebUser user, string profileId)
     {
-        var profiles = await _profiles.ListAsync();
+        var profiles = await _profiles.For(user).ListAsync();
         return profiles.FirstOrDefault(p => p.Id == profileId)
             ?? throw new InvalidOperationException($"Profile '{profileId}' not found.");
+    }
+
+    /// <summary>
+    /// The profile's connection, for this chat only: without it the REPL uses the connection in the account's
+    /// config, if it has one, whatever profile was picked.
+    /// </summary>
+    internal static IEnumerable<string> ConnectionArgs(ModelProfile profile)
+    {
+        // The Profiles page's "other" means OpenAI-compatible, which is the CLI's default for a custom endpoint.
+        if (profile.Provider is { Length: > 0 } provider && provider != "other")
+        {
+            yield return "--provider";
+            yield return provider;
+        }
+        if (!string.IsNullOrWhiteSpace(profile.Endpoint))
+        {
+            yield return "--endpoint";
+            yield return profile.Endpoint.Trim();
+        }
     }
 
     private static string NewKey() => Guid.NewGuid().ToString("N")[..8];
@@ -391,9 +500,11 @@ public sealed class ReplService : IDisposable
     private static string? Str(JsonElement el, string prop) =>
         el.TryGetProperty(prop, out var v) ? v.GetString() : null;
 
+    /// <summary>Lets go of every chat; their relays keep them open for the next server.</summary>
     public void Dispose()
     {
-        foreach (var s in _sessions.Values) s.Dispose();
+        _stopping = true;
+        foreach (var s in _sessions.Values) s.Bridge?.Dispose();
         _sessions.Clear();
     }
 }

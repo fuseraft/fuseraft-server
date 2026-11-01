@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # MinVer derives the version from git tags
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build & test (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: ./build.sh test
+
+      - name: Build & test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./build.ps1 test
+
+  pack:
+    name: Pack (${{ matrix.rid }})
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [linux-x64, linux-arm64, osx-x64, osx-arm64, win-x64]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Pack
+        run: ./build.sh pack ${{ matrix.rid }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: fuseraft-web-${{ matrix.rid }}
+          path: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+          retention-days: 30
+
+  release:
+    name: GitHub Release
+    needs: pack
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes

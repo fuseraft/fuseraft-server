@@ -34,12 +34,12 @@ else
 
     protected override void OnInitialized()
     {
-        _pending = [..Broker.GetPending()];
+        _pending = [..Broker.GetPending(Current.User)];
         Broker.PendingChanged += OnPendingChanged;
     }
 
     private void OnPendingChanged() =>
-        InvokeAsync(() => { _pending = [..Broker.GetPending()]; StateHasChanged(); });
+        InvokeAsync(() => { _pending = [..Broker.GetPending(Current.User)]; StateHasChanged(); });
 
     public void Dispose() => Broker.PendingChanged -= OnPendingChanged;
 }

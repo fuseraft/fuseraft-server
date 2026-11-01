@@ -65,7 +65,7 @@
     </div>
 }
 
-@if (SessionService.HistoryError is { } historyError)
+@if (SessionService.HistoryError(Current.User) is { } historyError)
 {
     <div class="error-banner">Couldn't load past sessions from fuseraft: @historyError</div>
 }
@@ -99,17 +99,18 @@
 
     private IEnumerable<ManagedSession> Filtered => _filter switch
     {
-        "Running"   => SessionService.GetSessions().Where(s => s.IsLive),
-        "Succeeded" => SessionService.GetSessions().Where(s => s.Status == SessionStatus.Succeeded),
-        "Failed"    => SessionService.GetSessions().Where(s => s.Status == SessionStatus.Failed),
-        "Cancelled" => SessionService.GetSessions().Where(s => s.Status == SessionStatus.Cancelled),
-        _           => SessionService.GetSessions(),
+        "Running"   => SessionService.GetSessions(Current.User).Where(s => s.IsLive),
+        "Succeeded" => SessionService.GetSessions(Current.User).Where(s => s.Status == SessionStatus.Succeeded),
+        "Failed"    => SessionService.GetSessions(Current.User).Where(s => s.Status == SessionStatus.Failed),
+        "Cancelled" => SessionService.GetSessions(Current.User).Where(s => s.Status == SessionStatus.Cancelled),
+        _           => SessionService.GetSessions(Current.User),
     };
 
     protected override void OnInitialized()
     {
         SessionService.SessionListChanged += OnListChanged;
         WorkspaceService.Changed += OnWorkspaceChanged;
+        _ = SessionService.EnsureHistoryAsync(Current.User);
         var uri  = new Uri(Nav.Uri);
         var qs   = QueryHelpers.ParseQuery(uri.Query);
         if (qs.TryGetValue("workspace", out var ws)  && !string.IsNullOrWhiteSpace(ws))
@@ -155,7 +156,7 @@
 
         try
         {
-            var id = await SessionService.StartSessionAsync(
+            var id = await SessionService.StartSessionAsync(Current.User, 
                 _newTask.Trim(), _newConfig.Trim(), _newWorkspace.Trim());
             _showNew = false;
             Nav.NavigateTo($"/sessions/{id}");
@@ -177,7 +178,7 @@
         _listError = null;
         try
         {
-            await SessionService.DeleteSessionAsync(sessionId);
+            await SessionService.DeleteSessionAsync(Current.User, sessionId);
         }
         catch (Exception ex)
         {
@@ -191,7 +192,7 @@
         _listError = null;
         try
         {
-            var id = await SessionService.ResumeSessionAsync(sessionId);
+            var id = await SessionService.ResumeSessionAsync(Current.User, sessionId);
             Nav.NavigateTo($"/sessions/{id}");
         }
         catch (Exception ex)

@@ -210,7 +210,7 @@
         _workspace = WorkspaceService.Current;
         WorkspaceService.Changed += OnWorkspaceChanged;
         _profiles = await ProfileService.ListAsync();
-        _recentConfigs = SessionHostService.GetSessions()
+        _recentConfigs = SessionHostService.GetSessions(Current.User)
             .Where(s => !string.IsNullOrEmpty(s.ConfigPath) && File.Exists(s.ConfigPath))
             .DistinctBy(s => s.ConfigPath, StringComparer.OrdinalIgnoreCase)
             .Take(10)

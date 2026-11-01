@@ -1,4 +1,4 @@
-namespace fuseraft.Server.Services;
+namespace fuseraft.Web.Services;
 
 /// <summary>Where the server keeps its own files: fuseraft's home directory, resolved the way fuseraft does.</summary>
 public static class FuseraftHome

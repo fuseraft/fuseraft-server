@@ -1,6 +1,7 @@
-using fuseraft.Server.Services;
+using fuseraft.Web.Services;
+using fuseraft.Web.Services.Users;
 
-namespace FuseraftServer.Tests;
+namespace FuseraftWeb.Tests;
 
 public sealed class OrchestrationTemplateServiceTests
 {
@@ -13,7 +14,7 @@ public sealed class OrchestrationTemplateServiceTests
         var cli = new FakeCli();
         cli.Responses["init o.yaml --template solo --json --model gpt-4o --force"] = Result;
 
-        var result = await new OrchestrationTemplateService(cli).GenerateAsync("/w", "solo", "o.yaml", "gpt-4o", "", force: true);
+        var result = await new OrchestrationTemplateService(cli, WorkspaceAccess.Unrestricted).GenerateAsync("/w", "solo", "o.yaml", "gpt-4o", "", force: true);
 
         Assert.Equal("/w/.fuseraft/config/o.yaml", result.ConfigPath);
         Assert.Equal("/w", Assert.Single(cli.Queries).Cwd);
@@ -25,7 +26,7 @@ public sealed class OrchestrationTemplateServiceTests
         var cli = new FakeCli();
         cli.Responses["init o.yaml --template solo --json"] = Result;
 
-        await new OrchestrationTemplateService(cli).GenerateAsync("/w", "solo", "o.yaml", model: " ", endpoint: null, force: false);
+        await new OrchestrationTemplateService(cli, WorkspaceAccess.Unrestricted).GenerateAsync("/w", "solo", "o.yaml", model: " ", endpoint: null, force: false);
 
         Assert.DoesNotContain("--model", Assert.Single(cli.Queries).Args);
     }

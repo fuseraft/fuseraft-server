@@ -1,4 +1,4 @@
-namespace fuseraft.Server.Models;
+namespace fuseraft.Web.Models;
 
 public sealed record SessionEvent
 {

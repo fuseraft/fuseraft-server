@@ -7,3 +7,4 @@ obj/
 !.fuseraft/config/**
 !.fuseraft/context/
 !.fuseraft/context/**
+artifacts/

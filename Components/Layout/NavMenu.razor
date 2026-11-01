@@ -20,10 +20,13 @@
             <span class="nav-icon">⬡</span>
             <span>Builder</span>
         </NavLink>
-        <NavLink href="/daemons" class="nav-item">
-            <span class="nav-icon">⇄</span>
-            <span>Daemons</span>
-        </NavLink>
+        @if (Current.User.IsAdmin)
+        {
+            <NavLink href="/daemons" class="nav-item">
+                <span class="nav-icon">⇄</span>
+                <span>Daemons</span>
+            </NavLink>
+        }
         <NavLink href="/schedule" class="nav-item">
             <span class="nav-icon">⏱</span>
             <span>Schedule</span>
@@ -60,6 +63,21 @@
                 <span class="nav-badge">@_pendingCount</span>
             }
         </NavLink>
+        @if (Current.User.IsAdmin)
+        {
+            <NavLink href="/users" class="nav-item">
+                <span class="nav-icon">☺</span>
+                <span>Users</span>
+            </NavLink>
+        }
+    </div>
+
+    <div class="nav-user">
+        <a href="/account" title="Your account">@Current.User.Label</a>
+        <form method="post" action="account/logout" data-enhance="false">
+            <AntiforgeryToken />
+            <button class="btn btn-sm" type="submit">Sign out</button>
+        </form>
     </div>
 </nav>
 
@@ -68,12 +86,12 @@
 
     protected override void OnInitialized()
     {
-        _pendingCount = Broker.GetPending().Count;
+        _pendingCount = Broker.GetPending(Current.User).Count;
         Broker.PendingChanged += OnPendingChanged;
     }
 
     private void OnPendingChanged() =>
-        InvokeAsync(() => { _pendingCount = Broker.GetPending().Count; StateHasChanged(); });
+        InvokeAsync(() => { _pendingCount = Broker.GetPending(Current.User).Count; StateHasChanged(); });
 
     public void Dispose() => Broker.PendingChanged -= OnPendingChanged;
 }

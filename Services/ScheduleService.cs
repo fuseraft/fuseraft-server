@@ -1,10 +1,11 @@
-using fuseraft.Server.Models;
-using fuseraft.Server.Services.Cli;
+using fuseraft.Web.Models;
+using fuseraft.Web.Services.Cli;
+using fuseraft.Web.Services.Users;
 
-namespace fuseraft.Server.Services;
+namespace fuseraft.Web.Services;
 
 /// <summary>Scheduled jobs, managed through <c>fuseraft schedule</c>.</summary>
-public sealed class ScheduleService(FuseraftCli cli)
+public sealed class ScheduleService(FuseraftCli cli, WorkspaceAccess access)
 {
     public Task<List<WireScheduledJob>> GetJobsAsync() =>
         cli.ListAsync<WireScheduledJob>("schedule", "list", "--json");
@@ -13,9 +14,10 @@ public sealed class ScheduleService(FuseraftCli cli)
         string? configPath = null, string? description = null, string? workDir = null)
     {
         List<string> args = ["schedule", "add", name, "--cron", cron, "--task", task];
-        if (!string.IsNullOrWhiteSpace(configPath))  args.AddRange(["--config", configPath]);
+        if (!string.IsNullOrWhiteSpace(configPath))  args.AddRange(["--config", access.Check(configPath, workDir)]);
         if (!string.IsNullOrWhiteSpace(description)) args.AddRange(["--description", description]);
-        if (!string.IsNullOrWhiteSpace(workDir))     args.AddRange(["--work-dir", workDir]);
+        if (!string.IsNullOrWhiteSpace(workDir))     args.AddRange(["--work-dir", access.Check(workDir)]);
+        else if (access.Roots.Count > 0)              throw new ArgumentException("Pick a working directory for the job.");
         return cli.RunAsync([.. args]);
     }
 

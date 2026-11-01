@@ -1,6 +1,6 @@
-using fuseraft.Server.Services;
+using fuseraft.Web.Services;
 
-namespace FuseraftServer.Tests;
+namespace FuseraftWeb.Tests;
 
 public sealed class LineDiffTests
 {

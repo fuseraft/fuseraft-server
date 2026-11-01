@@ -1,6 +1,6 @@
-using fuseraft.Server.Models;
+using fuseraft.Web.Models;
 
-namespace fuseraft.Server.Services.Daemons;
+namespace fuseraft.Web.Services.Daemons;
 
 /// <summary>
 /// The <c>fuseraft serve</c> daemons this server can attach to: those in <c>Fuseraft:Daemons</c>, plus any

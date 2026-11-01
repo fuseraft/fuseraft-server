@@ -92,17 +92,17 @@
         Broker.PendingChanged     -= OnPendingChanged;
         try
         {
-            _session = await SessionService.LoadSessionAsync(SessionId);
+            _session = await SessionService.LoadSessionAsync(Current.User, SessionId);
         }
         catch (Exception ex)
         {
-            _session     = SessionService.GetSession(SessionId);
+            _session     = SessionService.GetSession(Current.User, SessionId);
             _actionError = $"Couldn't load the session's messages: {ex.Message}";
         }
         if (_session is not null)
         {
             _events    = _session.SnapshotEvents();
-            _approvals = [.. Broker.GetPending(SessionId)];
+            _approvals = [.. Broker.GetPending(Current.User, SessionId)];
             SessionService.EventFired += OnEvent;
             Broker.PendingChanged     += OnPendingChanged;
         }
@@ -114,16 +114,16 @@
         if (sessionId != SessionId) return;
         InvokeAsync(() =>
         {
-            _session = SessionService.GetSession(SessionId) ?? _session;
+            _session = SessionService.GetSession(Current.User, SessionId) ?? _session;
             _events.Add(evt);
             StateHasChanged();
         });
     }
 
     private void OnPendingChanged() =>
-        InvokeAsync(() => { _approvals = [.. Broker.GetPending(SessionId)]; StateHasChanged(); });
+        InvokeAsync(() => { _approvals = [.. Broker.GetPending(Current.User, SessionId)]; StateHasChanged(); });
 
-    private void Cancel() => SessionService.CancelSession(SessionId);
+    private void Cancel() => SessionService.CancelSession(Current.User, SessionId);
 
     private async Task ResumeAsync()
     {
@@ -131,9 +131,9 @@
         _actionError = null;
         try
         {
-            var id = await SessionService.ResumeSessionAsync(SessionId);
+            var id = await SessionService.ResumeSessionAsync(Current.User, SessionId);
             Nav.NavigateTo($"/sessions/{id}", forceLoad: false);
-            _session = SessionService.GetSession(id);
+            _session = SessionService.GetSession(Current.User, id);
             _events  = _session?.SnapshotEvents() ?? [];
         }
         catch (Exception ex)

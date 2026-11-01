@@ -1,8 +1,10 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using fuseraft.Web.Services.Relay;
+using fuseraft.Web.Services.Users;
 
-namespace fuseraft.Server.Services.Cli;
+namespace fuseraft.Web.Services.Cli;
 
 public sealed class FuseraftCliOptions
 {
@@ -25,16 +27,25 @@ public interface IBridgeProcess : IDisposable
 
 /// <summary>
 /// The server's only way to reach fuseraft: it runs the CLI and speaks its wire protocol
-/// (docs/protocol.md in fuseraft-cli) rather than linking fuseraft's assemblies.
+/// (docs/protocol.md in fuseraft-cli) rather than linking fuseraft's assemblies. Sessions and chats run through
+/// relays (<see cref="RelayHost"/>) so they outlive the server.
 /// </summary>
-public class FuseraftCli(IOptions<FuseraftCliOptions> options)
+public class FuseraftCli(IOptions<FuseraftCliOptions> options, IOptions<WebOptions>? web = null)
 {
+    private readonly RelayLauncher? _relays = web is null ? null : new RelayLauncher(web.Value.ResolvedDataDirectory);
+
     /// <summary>The protocol version this server was built against.</summary>
     public const int ProtocolVersion = 1;
 
     internal static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
     private string Binary => options.Value.Binary;
+
+    /// <summary>The <c>FUSERAFT_HOME</c> every command runs against; null means fuseraft's own default.</summary>
+    public string? Home { get; private init; }
+
+    /// <summary>This CLI, running every command against <paramref name="home"/>: one user's sessions, memory and schedule.</summary>
+    public virtual FuseraftCli ForHome(string home) => new(options, web) { Home = home };
 
     public async Task<List<T>> ListAsync<T>(params string[] args)
     {
@@ -56,12 +67,37 @@ public class FuseraftCli(IOptions<FuseraftCliOptions> options)
     }
 
     /// <summary>Runs a command for its effect; a non-zero exit throws with what it printed.</summary>
-    public virtual async Task RunAsync(params string[] args)
+    public virtual Task RunAsync(params string[] args) => RunAsync(null, args);
+
+    /// <summary>Like <see cref="RunAsync(string[])"/>, with extra environment variables (such as a user's profile keys).</summary>
+    public virtual async Task RunAsync(IReadOnlyDictionary<string, string>? environment, params string[] args)
     {
-        var (exit, stdout, stderr) = await ExecAsync(args);
+        var (exit, stdout, stderr) = await ExecAsync(args, environment: environment);
         if (exit != 0)
             throw new FuseraftCliException(FirstNonEmpty(stderr, stdout) ?? $"fuseraft {args.FirstOrDefault()} exited with code {exit}.");
     }
+
+    /// <summary>
+    /// Starts a bridge process. A tagged one runs in a relay, so it keeps running if the server stops and
+    /// <see cref="ReattachBridgesAsync"/> finds it again.
+    /// </summary>
+    public virtual async Task<IBridgeProcess> StartBridgeAsync(IEnumerable<string> args, string? workingDirectory = null,
+        IReadOnlyDictionary<string, string>? environment = null, BridgeTag? tag = null)
+    {
+        if (tag is null || _relays is null) return StartBridge(args, workingDirectory, environment);
+
+        var env = new Dictionary<string, string>(environment ?? new Dictionary<string, string>());
+        if (Home is not null)
+        {
+            Directory.CreateDirectory(Home);
+            env["FUSERAFT_HOME"] = Home;
+        }
+        return await _relays.StartAsync(Binary, args, workingDirectory, env, tag);
+    }
+
+    /// <summary>The relayed processes a previous server left running, with what each one is.</summary>
+    public virtual async Task<IReadOnlyList<(BridgeTag Tag, IBridgeProcess Process)>> ReattachBridgesAsync() =>
+        _relays is null ? [] : [.. (await _relays.ReattachAsync()).Select(r => (r.Tag, (IBridgeProcess)r.Bridge))];
 
     public virtual IBridgeProcess StartBridge(IEnumerable<string> args, string? workingDirectory = null,
         IReadOnlyDictionary<string, string>? environment = null)
@@ -120,10 +156,10 @@ public class FuseraftCli(IOptions<FuseraftCliOptions> options)
     {
         if (!message.TryGetProperty("protocolVersion", out var v) || v.ValueKind != JsonValueKind.Number)
             throw new FuseraftCliException(
-                $"The installed fuseraft doesn't report a protocol version. fuseraft-server needs a fuseraft that speaks protocol version {ProtocolVersion}; update it with 'fuseraft update'.");
+                $"The installed fuseraft doesn't report a protocol version. fuseraft-web needs a fuseraft that speaks protocol version {ProtocolVersion}; update it with 'fuseraft update'.");
         if (v.GetInt32() != ProtocolVersion)
             throw new FuseraftCliException(
-                $"The installed fuseraft speaks protocol version {v.GetInt32()}, but this fuseraft-server speaks version {ProtocolVersion}. Install matching versions.");
+                $"The installed fuseraft speaks protocol version {v.GetInt32()}, but this fuseraft-web speaks version {ProtocolVersion}. Install matching versions.");
     }
 
     private ProcessStartInfo StartInfo(IEnumerable<string> args, string? workingDirectory)
@@ -136,14 +172,21 @@ public class FuseraftCli(IOptions<FuseraftCliOptions> options)
             UseShellExecute        = false,
         };
         if (!string.IsNullOrWhiteSpace(workingDirectory)) psi.WorkingDirectory = workingDirectory;
+        if (Home is not null)
+        {
+            Directory.CreateDirectory(Home);
+            psi.Environment["FUSERAFT_HOME"] = Home;
+        }
         foreach (var a in args) psi.ArgumentList.Add(a);
         return psi;
     }
 
-    private async Task<(int Exit, string Stdout, string Stderr)> ExecAsync(string[] args, string? workingDirectory = null)
+    private async Task<(int Exit, string Stdout, string Stderr)> ExecAsync(string[] args, string? workingDirectory = null,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         var psi = StartInfo(args, workingDirectory);
         psi.RedirectStandardInput = false;
+        foreach (var (k, v) in environment ?? new Dictionary<string, string>()) psi.Environment[k] = v;
         Process proc;
         try
         {

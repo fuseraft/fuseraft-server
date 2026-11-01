@@ -1,10 +1,11 @@
-using fuseraft.Server.Models;
-using fuseraft.Server.Services.Cli;
+using fuseraft.Web.Models;
+using fuseraft.Web.Services.Cli;
+using fuseraft.Web.Services.Users;
 
-namespace fuseraft.Server.Services;
+namespace fuseraft.Web.Services;
 
 /// <summary>The team templates <c>fuseraft init</c> generates configs from.</summary>
-public sealed class OrchestrationTemplateService(FuseraftCli cli)
+public sealed class OrchestrationTemplateService(FuseraftCli cli, WorkspaceAccess access)
 {
     public Task<List<WireTemplate>> ListAsync() =>
         cli.ListAsync<WireTemplate>("init", "--list-templates", "--json");
@@ -13,6 +14,8 @@ public sealed class OrchestrationTemplateService(FuseraftCli cli)
     public Task<WireInitResult> GenerateAsync(string workspace, string template, string outputPath,
         string? model, string? endpoint, bool force)
     {
+        workspace = access.Check(workspace);
+        access.Check(outputPath, workspace);
         List<string> args = ["init", outputPath, "--template", template, "--json"];
         if (!string.IsNullOrWhiteSpace(model))    args.AddRange(["--model", model]);
         if (!string.IsNullOrWhiteSpace(endpoint)) args.AddRange(["--endpoint", endpoint]);
